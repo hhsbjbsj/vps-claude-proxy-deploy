@@ -141,8 +141,8 @@ systemctl daemon-reload
 systemctl enable --now sing-box
 systemctl is-active --quiet sing-box || fail "sing-box failed. Inspect: journalctl -u sing-box -n 80"
 
-# Patch the initial loopback UI bind BEFORE the installer starts its service.
-info "Preparing AI Mili installer with a loopback-only control panel"
+# Bind AI Mili Web UI to the public IPv4 interface, while keeping SOCKS5 loopback-only.
+info "Preparing AI Mili installer with a public IPv4 control panel"
 curl -fL --retry 3 --connect-timeout 10 --max-time 60 -o "$work/aimili-install.sh" \
   https://raw.githubusercontent.com/baoweise-bot/aimili-vpngate/main/install.sh
 # Only replace the literal initial config default; no bypass of installation.
@@ -152,7 +152,7 @@ import sys
 p=Path(sys.argv[1]); s=p.read_text()
 needle='"host": "::"'
 assert s.count(needle)>=2, "Upstream installer changed; inspect it before continuing"
-p.write_text(s.replace(needle, '"host": "127.0.0.1"'))
+p.write_text(s.replace(needle, '"host": "0.0.0.0"'))
 PY
 info "Installing AI Mili (may fetch a free VPNGate node automatically)"
 AIMILIVPN_NONINTERACTIVE=1 bash "$work/aimili-install.sh"
@@ -162,14 +162,14 @@ systemctl is-active sing-box || true
 systemctl is-active aimilivpn || true
 ss -lntp | grep -E ':(443|8443|7928|8787)\b' || true
 
-# Restrict UI even if installation behavior changes unexpectedly.
+# Ensure that the management UI uses the requested public IPv4 bind.
 if [[ -f /opt/aimilivpn/vpngate_data/ui_auth.json ]]; then
   python3 - <<'PY'
 import json,os
 p='/opt/aimilivpn/vpngate_data/ui_auth.json'
 with open(p) as f: data=json.load(f)
-if data.get('host') != '127.0.0.1':
-    data['host']='127.0.0.1'
+if data.get('host') != '0.0.0.0':
+    data['host']='0.0.0.0'
     tmp=p+'.tmp'
     with open(tmp,'w') as f: json.dump(data,f,indent=2)
     os.chmod(tmp,0o600); os.replace(tmp,p)
@@ -180,6 +180,7 @@ fi
 if command -v ufw >/dev/null && ufw status 2>/dev/null | grep -q 'Status: active'; then
   ufw allow 443/tcp
   ufw allow 8443/tcp
+  ufw allow 8787/tcp
 fi
 
 info "Saving Karing import links (root-only)"
@@ -193,9 +194,9 @@ chmod 600 /root/karing-nodes.txt
 printf '\n===== Import links (keep private) =====\n'
 cat /root/karing-nodes.txt
 printf '\n===== AI Mili panel =====\n'
-echo 'On your Windows PC, use: ssh -N -L 8787:127.0.0.1:8787 root@YOUR_VPS_IP'
-echo 'Then use: ml status (on VPS) to see the panel path and credentials.'
-echo 'Panel via SSH tunnel: http://127.0.0.1:8787/SECRET_PATH/'
+echo "AI Mili Web UI: http://${PUBLIC_IP}:8787/SECRET_PATH/"
+echo 'Use: ml status (on VPS) to see the actual panel path and credentials.'
+echo 'Open inbound TCP 8787 in your VPS provider firewall/security group if required.'
 printf '\n===== Local AI Mili SOCKS test =====\n'
 if curl -4fsS --max-time 12 --proxy socks5h://127.0.0.1:7928 https://api.ipify.org; then echo; else
   echo 'Residential SOCKS egress is NOT verified. Check tun0 and select a fixed VPNGate node in the panel.'
@@ -204,5 +205,5 @@ printf '\n===== Important =====\n'
 echo '443: default VPS egress; recognized Claude TCP routed via AI Mili.'
 echo '8443: all TCP through AI Mili; UDP rejected; no fallback to VPS direct.'
 echo 'Keep Karing TUN & DNS routing configured. 8443 is best for fail-closed sensitive traffic.'
-echo 'In provider firewall/security group, allow inbound TCP 443 and TCP 8443.'
+echo 'In provider firewall/security group, allow inbound TCP 443, 8443, and 8787.'
 echo 'VPNGate public exit IP may change. No stable IP or account access is guaranteed.'
