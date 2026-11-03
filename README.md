@@ -1,6 +1,6 @@
-# Ubuntu VPS：sing-box + AI Mili VPNGate 部署脚本
+# Linux VPS：sing-box + AI Mili VPNGate 多发行版部署
 
-在全新 Ubuntu VPS 上部署 VLESS + REALITY 节点，以及 AI Mili VPNGate SOCKS5 出口。**仓库不包含任何运行后生成的凭据、UUID、REALITY 私钥、节点链接或 VPS IP。**
+在全新 Debian、Ubuntu、Alpine、Fedora 或兼容 RPM 系 Linux VPS 上部署 VLESS + REALITY 节点，以及 AI Mili VPNGate SOCKS5 出口。**仓库不包含任何运行后生成的凭据、UUID、REALITY 私钥、节点链接或 VPS IP。**
 
 > ⚠️ 实验性配置：已做 Bash 语法检查，但未在目标 VPS 上完成端到端验证。脚本会安装服务、修改系统网络参数；应在可通过云厂商控制台恢复的 VPS 上使用。请先审查源码。
 
@@ -12,60 +12,91 @@
 - AI Mili 的 SOCKS5：`127.0.0.1:7928`，Web 控制面板：`0.0.0.0:8787`（公网 IPv4 可访问）。
 - Karing 导入链接保存在 VPS 的 `/root/karing-nodes.txt`，文件权限为 0600。
 
-## 运行要求
+## 运行要求与兼容性
 
-全新 Ubuntu VPS，`x86_64` 或 `aarch64` 架构，具备 root/sudo 权限、systemd、`/dev/net/tun`，可访问 apt 和 GitHub。云服务商安全组允许 TCP **443**、**8443**、**8787** 入站；**不要将 7928 代理端口开放到互联网**。公网面板使用随机路径与账号密码，建议额外配置 HTTPS 或可信来源 IP 限制。
+需要全新 VPS、root 权限、`x86_64` / `aarch64` 架构、`/dev/net/tun`、可工作的软件源和 GitHub 下载连通性，且 **Python 3.10 或更高版本**。共享内核容器未必允许建立 TUN 或策略路由；这种环境不应直接使用本部署器。
 
-若已存在 `/etc/sing-box/config.json` 或 `/opt/aimilivpn`，脚本会拒绝覆盖，以免误删旧配置。
+| 发行版 | 包管理器 | 服务管理 | 支持范围 |
+| --- | --- | --- | --- |
+| Debian 12 / 13 | apt-get | systemd | 核心支持 |
+| Ubuntu 24.04+ / 26.04 | apt-get | systemd | 核心支持 |
+| Alpine Linux（OpenRC） | apk | OpenRC | 已加入安装适配，仍需真实 VPS 验收 |
+| Fedora（现代版本） | dnf | systemd | 已加入安装适配，仍需真实 VPS 验收 |
+| Rocky / AlmaLinux / RHEL / Oracle Linux / CentOS Stream / Amazon Linux | dnf 或 yum | systemd | **有条件适配**：要求 Python 3.10+，OpenVPN 软件包可用，EPEL/额外仓库可能必需；RHEL9 系常见的 Python 3.9 **不满足要求** |
+| Arch / Manjaro / openSUSE / Void / 其他 | — | — | 暂不支持，预检将明确拒绝，不会盲装 |
 
-## 全新 Ubuntu VPS：首次一键安装（请先做这一步）
+公网 Web 面板监听 TCP **8787**，VLESS Reality 监听 TCP **443 / 8443**；请在 VPS 服务商防火墙允许这些端口。**SOCKS5 7928 只监听 127.0.0.1，禁止向公网开放。** 公网面板直接使用 HTTP 存在明文凭据风险，建议为其配置 HTTPS 反向代理或 IP 白名单。
 
-**首次登录一台从未部署过本项目的 VPS 时，必须先执行下面的安装命令。** `vp`、`ml`、`sing-box` 都不是 Ubuntu 自带命令；在基础安装完成之前，直接运行验收命令会出现 `inactive`、`command not found` 或 `No such file or directory`。**不要把「验收与管理」当作安装步骤。**
+若已有 `/etc/sing-box/config.json` 或 `/opt/aimilivpn`，主部署器会拒绝覆盖。更新已有服务器请使用 `vp` 管理菜单，不要重新执行首次安装。
 
-以下每条命令都是**完整的一行**，不要自行加入反斜杠 `\` 或空行。适用于已登录为 `root` 的全新 Ubuntu VPS：
+## 全新 VPS：首次一键安装（请先做这一步）
 
-**第 1 步：安装下载工具**
+**第一步：根据发行版安装下载工具**。所有命令都是完整的一行，避免因为反斜杠换行复制出错。
+
+**Debian / Ubuntu：**
 
 ```bash
-apt-get update && apt-get install -y curl ca-certificates less
+apt-get update && apt-get install -y bash curl ca-certificates less
 ```
 
-**第 2 步：下载主部署脚本**
+**Alpine Linux：**
+
+```bash
+apk add --no-cache bash curl ca-certificates less
+```
+
+**Fedora / RHEL 系：**
+
+```bash
+dnf install -y bash curl ca-certificates less
+```
+
+如果该发行版没有 `dnf` 而只有 `yum`，使用 `yum install -y bash curl ca-certificates less`。
+
+**第二步：下载主部署器（所有发行版相同）**
 
 ```bash
 curl -fL --retry 3 -o /root/deploy.sh https://raw.githubusercontent.com/hhsbjbsj/vps-claude-proxy-deploy/main/deploy_vps_claude.sh
 ```
 
-**第 3 步：确认下载成功并检查语法**
+**第三步：检查脚本并执行无修改预检**
 
 ```bash
-ls -lh /root/deploy.sh && bash -n /root/deploy.sh && echo "下载成功，语法检查通过"
+ls -lh /root/deploy.sh && bash -n /root/deploy.sh && bash /root/deploy.sh --preflight
 ```
 
-**第 4 步：阅读代码并开始部署**
+预检只显示发行版、包管理器、服务管理器、Python 版本和 TUN 状态，**不会安装软件或改变系统配置**。如果报告缺少 TUN、未运行 systemd/OpenRC，或 Python 版本过低，需要先解决；尤其不要把 Rocky/Alma/RHEL9 上的 Python 3.9 当成已兼容。
+
+**第四步：阅读并开始安装**
 
 ```bash
 less /root/deploy.sh
 ```
 
-查看后按 `q` 退出，再运行：
+查看完按 `q` 返回终端，再运行：
 
 ```bash
 bash /root/deploy.sh
 ```
 
-脚本负责：安装 sing-box 及两个 Reality 节点、安装 AI Mili、集成严格住宅候选筛选、保存 Karing 导入链接，并安装可随时用 `vp` 打开的管理菜单。实际运行是否成功，应以安装日志和下一节的验收结果为准。安装过程中报错应**立即停止排查**，不要跳过报错继续验收。
+部署器会安装 sing-box 双 Reality 节点、AI Mili、严格住宅筛选、Karing 导入链接和 `vp` 管理菜单。安装结果需以日志和下方验收为准；出现 `[ERROR]` / `FATAL` 必须先排查，不要继续当作部署成功验收。
 
-如果不能自动获取公网 IPv4，可在确认服务器公网地址后运行 `PUBLIC_IP=你的公网IPv4 bash /root/deploy.sh`。注意：本脚本为了防止覆盖已有密钥和数据，不允许直接反复执行覆盖已生成的配置。首次安装中断时，先查看报错和文件状态，不要直接删除或重装。
+如果不能自动获取公网 IPv4，确认真实公网地址后运行 `PUBLIC_IP=你的公网IPv4 bash /root/deploy.sh`。主脚本为防止覆盖旧密钥和配置，不会直接重装已有的 sing-box / AI Mili；中断时先查日志、不要直接删除配置。
 
 ## 首次安装完成后：逐项验收（不是安装命令）
 
 只有第 4 步安装结束、没有出现 `[ERROR]` / `FATAL` 后，才执行以下命令。保持一条一条运行，避免终端复制时把不同命令拼在一起。
 
-**检查两项服务是否运行：**
+**检查两项服务是否运行：** Debian、Ubuntu、Fedora、RPM 系使用：
 
 ```bash
 systemctl is-active sing-box aimilivpn
+```
+
+Alpine Linux（OpenRC）使用：
+
+```bash
+rc-service sing-box status && rc-service aimilivpn status
 ```
 
 **检查 sing-box 配置：**
@@ -92,7 +123,7 @@ ml status
 curl -4 --max-time 20 --proxy socks5h://127.0.0.1:7928 https://api.ipify.org
 ```
 
-如果此时 `sing-box` / `ml` 提示未找到，或者两个 systemd 服务均为 `inactive`，优先确认是否真的执行过 `bash /root/deploy.sh` 以及它中途是否报错；仅仅安装 `curl` 不会安装代理。住宅 SOCKS5 检测失败并不一定代表 sing-box 安装失败，可能是尚无合格的 AI Mili VPNGate 出口。
+如果此时 `sing-box` / `ml` 提示未找到，或者两个服务都未运行，优先确认是否真的执行过 `bash /root/deploy.sh` 以及它中途是否报错；仅仅安装 `curl` 不会安装代理。住宅 SOCKS5 检测失败并不一定代表 sing-box 安装失败，可能是尚无合格的 AI Mili VPNGate 出口。
 
 
 AI Mili 管理面板默认公网监听。在浏览器打开 `http://你的VPS公网IP:8787/随机安全路径/`，随机路径和账号由 VPS 的 `ml status` 给出。如无法打开，请检查云厂商的防火墙/安全组是否允许 TCP 8787。**HTTP 明文访问可能泄露登录凭据；建议为公网访问配置 HTTPS 反向代理。**根据需要在 AI Mili 面板选择 VPNGate 节点，并核验 SOCKS5 的实际出口 IP。
@@ -103,7 +134,7 @@ AI Mili 管理面板默认公网监听。在浏览器打开 `http://你的VPS公
 - AI Mili 当前 SOCKS5 只实现 TCP CONNECT；不支持 UDP ASSOCIATE。严格入口拒绝 UDP，可能影响 QUIC/HTTP3。
 - 只有真正经过 VPS、且被服务端识别的域名才能匹配域名规则。Karing 端仍需要 TUN、DNS 接管和适当的路由规则。本地直连或应用自带 DoH 不由服务端保证。
 - 上游 AI Mili 来自其官方 `main` 分支，随时间变化；生产环境宜固定版本并审查代码。
-- 本脚本不会自动调整云服务商防火墙；本地防火墙只在 UFW 已启用时添加 443/8443/8787 TCP。
+- 脚本不会自动调整云服务商防火墙；在已启用 UFW 或 firewalld 时尝试放行 443/8443/8787 TCP。Alpine、自定义 nftables 规则需单独检查。
 - 不要提交 `/etc/sing-box/config.json`、`/root/karing-nodes.txt` 或 AI Mili 的账号、凭据文件到公开仓库。
 
 ## 上游项目
@@ -112,7 +143,7 @@ AI Mili 管理面板默认公网监听。在浏览器打开 `http://你的VPS公
 
 ## 常驻 VPS 管理面板（vp）
 
-这个项目新增了**终端交互管理面板**。安装一次以后，重启系统或重新登录 SSH 也可以随时输入 `vp` 召唤；它不是需要开放公网端口的独立 Web 站点。AI Mili 的 8787 Web 管理后台仍保持原有配置。
+这个项目新增了**终端交互管理面板**，支持 systemd 与 OpenRC。安装一次以后，重启系统或重新登录 SSH 也可以随时输入 `vp` 召唤；它不是需要开放公网端口的独立 Web 站点。AI Mili 的 8787 Web 管理后台仍保持原有配置。
 
 已经安装过本项目的 VPS，**不要再次运行 `deploy_vps_claude.sh`**，而是单独安装常驻菜单（以下每条都是完整的单行命令）：
 
@@ -176,10 +207,10 @@ bash /root/install_manager.sh
 vp
 ```
 
-**更新保护：**本项目会安装一个 systemd 启动前检查：当 AI Mili 仍为经过适配的 2.1.5 版本时，即使 `ml update` 覆盖了管理器源码，下次重启也会自动恢复严格住宅修改版。如果上游更新为其他版本，启动前检查会**拒绝启动 AI Mili**，避免静默失去严格住宅筛选。此时需先适配新版本，不能强行关闭检查来继续使用。此保护仅作用于 Aimili 服务，不会改动 sing-box 或 SSH。
+**更新保护：**本项目会安装一个启动前检查（systemd 或 OpenRC）：当 AI Mili 仍为经过适配的 2.1.5 版本时，即使 `ml update` 覆盖了管理器源码，下次重启也会自动恢复严格住宅修改版。如果上游更新为其他版本，启动前检查会**拒绝启动 AI Mili**，避免静默失去严格住宅筛选。OpenRC 的原版 `ml update` 可能覆盖服务启动钩子，Alpine 更新上游后应重新运行严格住宅安装器。此时需先适配新版本，不能强行关闭检查来继续使用。此保护仅作用于 Aimili 服务，不会改动 sing-box 或 SSH。
 
 ### BBRv3 项目集成
 
-菜单选择 BBRv3 后才会下载并启动 [byJoey/Actions-bbr-v3](https://github.com/byJoey/Actions-bbr-v3) 的交互式安装脚本。出于安全性和可重现性，上游脚本固定至提交 `4f9bd79bd66b6115f717665403e6d29839551604`；不复制其内核包，也不会在安装 `vp`、切换 IPv6 时自动装内核或重启。
+仅在 Debian / Ubuntu 系统上，菜单选择 BBRv3 后才会下载并启动 [byJoey/Actions-bbr-v3](https://github.com/byJoey/Actions-bbr-v3) 的交互式安装脚本。出于安全性和可重现性，上游脚本固定至提交 `4f9bd79bd66b6115f717665403e6d29839551604`；不复制其内核包，也不会在安装 `vp`、切换 IPv6 时自动装内核或重启。
 
 ⚠️ BBRv3 是内核级变更，可能影响 VPS 驱动、引导和网络；必须确认能通过云厂商控制台/救援模式恢复后再自行在上游菜单选择安装。**BBRv3 安装与 IPv6 出口切换是完全独立的两个功能。**
