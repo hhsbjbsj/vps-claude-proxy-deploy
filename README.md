@@ -9,12 +9,12 @@
 - sing-box 1.14.4，启动 VLESS + REALITY（Vision），随机生成凭据。
 - TCP **443**：普通入口，服务端能识别的 Claude 域名的 TCP 流量走 AI Mili，其他默认由 VPS 直连。
 - TCP **8443**：严格入口，所有 TCP 通过 AI Mili，失败后不自动改走 VPS 机房出口；UDP 拒绝。
-- AI Mili 的 SOCKS5：`127.0.0.1:7928`，Web 控制面板：`127.0.0.1:8787`（SSH 隧道访问）。
+- AI Mili 的 SOCKS5：`127.0.0.1:7928`，Web 控制面板：`0.0.0.0:8787`（公网 IPv4 可访问）。
 - Karing 导入链接保存在 VPS 的 `/root/karing-nodes.txt`，文件权限为 0600。
 
 ## 运行要求
 
-全新 Ubuntu VPS，`x86_64` 或 `aarch64` 架构，具备 root/sudo 权限、systemd、`/dev/net/tun`，可访问 apt 和 GitHub。云服务商安全组允许 TCP **443**、**8443** 入站；不要将 7928 或 8787 对互联网开放。
+全新 Ubuntu VPS，`x86_64` 或 `aarch64` 架构，具备 root/sudo 权限、systemd、`/dev/net/tun`，可访问 apt 和 GitHub。云服务商安全组允许 TCP **443**、**8443**、**8787** 入站；**不要将 7928 代理端口开放到互联网**。公网面板使用随机路径与账号密码，建议额外配置 HTTPS 或可信来源 IP 限制。
 
 若已存在 `/etc/sing-box/config.json` 或 `/opt/aimilivpn`，脚本会拒绝覆盖，以免误删旧配置。
 
@@ -46,13 +46,7 @@ sudo ml status
 curl -4 --max-time 15 --proxy socks5h://127.0.0.1:7928 https://api.ipify.org
 ```
 
-在 Windows PowerShell 中建立面板隧道：
-
-```powershell
-ssh -N -L 8787:127.0.0.1:8787 root@你的VPS公网IP
-```
-
-随后在本机浏览器打开 `http://127.0.0.1:8787/随机安全路径/`，路径和账号由 VPS 的 `ml status` 给出。根据需要在 AI Mili 面板选择 VPNGate 节点，并核验 SOCKS5 的实际出口 IP。
+AI Mili 管理面板默认公网监听。在浏览器打开 `http://你的VPS公网IP:8787/随机安全路径/`，随机路径和账号由 VPS 的 `ml status` 给出。如无法打开，请检查云厂商的防火墙/安全组是否允许 TCP 8787。**HTTP 明文访问可能泄露登录凭据；建议为公网访问配置 HTTPS 反向代理。**根据需要在 AI Mili 面板选择 VPNGate 节点，并核验 SOCKS5 的实际出口 IP。
 
 ## 注意事项
 
@@ -60,7 +54,7 @@ ssh -N -L 8787:127.0.0.1:8787 root@你的VPS公网IP
 - AI Mili 当前 SOCKS5 只实现 TCP CONNECT；不支持 UDP ASSOCIATE。严格入口拒绝 UDP，可能影响 QUIC/HTTP3。
 - 只有真正经过 VPS、且被服务端识别的域名才能匹配域名规则。Karing 端仍需要 TUN、DNS 接管和适当的路由规则。本地直连或应用自带 DoH 不由服务端保证。
 - 上游 AI Mili 来自其官方 `main` 分支，随时间变化；生产环境宜固定版本并审查代码。
-- 本脚本不会自动调整云服务商防火墙；本地防火墙只在 UFW 已启用时添加 443/8443 TCP。
+- 本脚本不会自动调整云服务商防火墙；本地防火墙只在 UFW 已启用时添加 443/8443/8787 TCP。
 - 不要提交 `/etc/sing-box/config.json`、`/root/karing-nodes.txt` 或 AI Mili 的账号、凭据文件到公开仓库。
 
 ## 上游项目
