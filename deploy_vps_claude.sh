@@ -166,7 +166,6 @@ install -d -m 0700 /etc/sing-box
 python3 - "$UUID" "$PRIVATE_KEY" "$SHORT_ID" "$SNI" <<'PY'
 import json, sys, os
 uuid, private_key, sid, sni = sys.argv[1:]
-claude_domains = ["anthropic.com", "claude.ai", "claude.com"]
 def vless_in(tag, port):
     return {
       "type": "vless", "tag": tag, "listen": "::", "listen_port": port,
@@ -194,8 +193,7 @@ cfg = {
      {"type": "https", "tag": "residential-doh", "server": "1.1.1.1", "path": "/dns-query", "tls": {"enabled": True, "server_name": "cloudflare-dns.com"}, "detour": "aimili-residential"}
    ],
    "rules": [
-     {"inbound": ["strict-8443"], "action": "route", "server": "residential-doh"},
-     {"domain_suffix": claude_domains, "action": "route", "server": "residential-doh"}
+     {"inbound": ["strict-8443"], "action": "route", "server": "residential-doh"}
    ],
    "final": "local-dns"
  },
@@ -204,9 +202,7 @@ cfg = {
    "rules": [
      {"action": "sniff", "timeout": "300ms"},
      {"inbound": ["strict-8443"], "network": "udp", "action": "reject"},
-     {"inbound": ["strict-8443"], "action": "route", "outbound": "aimili-residential"},
-     {"domain_suffix": claude_domains, "network": "udp", "action": "reject"},
-     {"domain_suffix": claude_domains, "action": "route", "outbound": "aimili-residential"}
+     {"inbound": ["strict-8443"], "action": "route", "outbound": "aimili-residential"}
    ],
    "final": "vps-direct"
  }
@@ -329,8 +325,8 @@ if curl -4fsS --max-time 12 --proxy socks5h://127.0.0.1:7928 https://api.ipify.o
   echo 'Residential SOCKS egress is NOT verified. Check tun0 and select a fixed VPNGate node in the panel.'
 fi
 printf '\n===== Important =====\n'
-echo '443: default VPS egress; recognized Claude TCP routed via AI Mili.'
-echo '8443: all TCP through AI Mili; UDP rejected; no fallback to VPS direct.'
+echo '443: all domains (including Claude) use VPS-direct; no forced residential routing.'
+echo '8443: independent opt-in residential exit (TCP through AI Mili, UDP rejected; no fallback).'
 echo 'Keep Karing TUN & DNS routing configured. 8443 is best for fail-closed sensitive traffic.'
 echo 'In provider firewall/security group, allow inbound TCP 443, 8443, and 8787.'
 echo 'VPNGate public exit IP may change. No stable IP or account access is guaranteed.'
