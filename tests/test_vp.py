@@ -1,4 +1,4 @@
-"""Offline tests for VP's non-destructive sing-box route switching."""
+"""Offline tests for the direct-only branch's independent inbounds/outbounds."""
 import importlib.util
 import json
 from pathlib import Path
@@ -13,18 +13,16 @@ spec.loader.exec_module(vp)
 
 def base():
     return {
-        'inbounds': [{'tag': 'normal-443'}, {'tag': 'strict-8443'}],
+        'inbounds': [{'tag': 'normal-443'}, {'tag': 'backup-8443'}],
         'outbounds': [
             {'type': 'direct', 'tag': 'vps-direct'},
-            {'type': 'socks', 'tag': 'aimili-residential', 'server': '127.0.0.1', 'server_port': 7928}
+            {'type': 'direct', 'tag': 'backup-direct'},
         ],
-        'dns': {'servers': [{'tag': 'local-dns'}]},
-        'route': {'final': 'vps-direct', 'rules': [
-            {'action': 'sniff', 'timeout': '300ms'},
-            {'inbound': ['strict-8443'], 'network': 'udp', 'action': 'reject'},
-            {'inbound': ['strict-8443'], 'action': 'route', 'outbound': 'aimili-residential'},
-            {'domain_suffix': ['anthropic.com', 'claude.ai'], 'action': 'route', 'outbound': 'aimili-residential'}
-        ]}
+        'dns': {'servers': [{'tag': 'local-dns', 'type': 'local'}]},
+        'route': {
+            'final': 'vps-direct',
+            'rules': [{'inbound': ['backup-8443'], 'action': 'route', 'outbound': 'backup-direct'}],
+        },
     }
 
 
@@ -37,27 +35,31 @@ def fake_cmd(argv, **kwargs):
 def test_switch_ipv6_and_back():
     with tempfile.TemporaryDirectory() as directory:
         folder = Path(directory)
-        config = folder / 'config.json'
-        config.write_text(json.dumps(base()))
-        with patch.object(vp, 'CFG', config), patch.object(vp, 'BASE', folder), \
+        cfg_path = folder / 'config.json'
+        cfg_path.write_text(json.dumps(base()))
+        with patch.object(vp, 'CFG', cfg_path), patch.object(vp, 'BASE', folder), \
              patch.object(vp, 'cmd', fake_cmd), patch.object(vp, 'require_root', lambda: None), \
              patch.object(vp, 'ipv6_ready', lambda address: None), \
              patch.object(vp.time, 'sleep', lambda seconds: None):
             vp.switch('ipv6', '2001:4860::abcd')
-            saved = json.loads(config.read_text())
+            saved = json.loads(cfg_path.read_text())
             assert saved['outbounds'][0]['inet6_bind_address'] == '2001:4860::abcd'
-            assert saved['route']['rules'][2]['outbound'] == 'aimili-residential'
-            assert saved['route']['rules'][3]['outbound'] == 'aimili-residential'
+            assert saved['outbounds'][1] == {'type': 'direct', 'tag': 'backup-direct'}
+            assert saved['route']['rules'][0] == base()['route']['rules'][0]
             assert saved['route']['rules'][-2]['strategy'] == 'ipv6_only'
             assert saved['route']['rules'][-1]['ip_version'] == 4
+            assert len(saved['route']['rules']) == 3
+
             vp.switch('ipv4')
-            saved = json.loads(config.read_text())
+            saved = json.loads(cfg_path.read_text())
             assert 'inet6_bind_address' not in saved['outbounds'][0]
+            assert saved['outbounds'][1] == {'type': 'direct', 'tag': 'backup-direct'}
+            assert saved['route']['rules'][0] == base()['route']['rules'][0]
             assert saved['route']['rules'][-2]['strategy'] == 'ipv4_only'
             assert saved['route']['rules'][-1]['ip_version'] == 6
-            assert len(saved['route']['rules']) == 6
+            assert len(saved['route']['rules']) == 3
 
 
 if __name__ == '__main__':
     test_switch_ipv6_and_back()
-    print('PASS: IPv6/IPv4 egress switching preserves residential rules')
+    print('PASS: 443 IPv4/IPv6 switch leaves independent 8443 backup direct egress intact')
