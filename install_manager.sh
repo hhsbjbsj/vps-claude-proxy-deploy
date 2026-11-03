@@ -16,6 +16,11 @@ trap 'rm -rf "$WORK"' EXIT
 SOURCE=https://raw.githubusercontent.com/hhsbjbsj/vps-claude-proxy-deploy/main/vp_manager.py
 curl -fL --retry 3 --connect-timeout 10 --max-time 60 -o "$WORK/vp_manager.py" "$SOURCE"
 python3 -m py_compile "$WORK/vp_manager.py"
+# Reject stale CDN downloads or scripts from before the terminal encoding fix.
+if ! grep -qF 'def configure_utf8_stdio()' "$WORK/vp_manager.py"; then
+  echo '[ERROR] 下载到旧版 VP 管理器：缺少 UTF-8 输出修复。为保护现有安装，拒绝覆盖。' >&2
+  exit 1
+fi
 install -d -m 755 /usr/local/libexec
 install -m 755 "$WORK/vp_manager.py" "$TARGET"
 cat > "$WORK/vp" <<'EOF'
@@ -25,6 +30,15 @@ export PYTHONIOENCODING=utf-8:backslashreplace
 exec /usr/bin/python3 /usr/local/libexec/vp_manager.py "$@"
 EOF
 install -m 755 "$WORK/vp" "$WRAPPER"
+if ! grep -qF 'export PYTHONIOENCODING=utf-8:backslashreplace' "$WRAPPER"; then
+  echo '[ERROR] VP 启动器未安装 UTF-8 修复，请检查安装路径。' >&2
+  exit 1
+fi
+"$WRAPPER" --help >/dev/null || {
+  echo '[ERROR] VP 新版启动器未通过自测。' >&2
+  exit 1
+}
 echo '[OK] VP 管理菜单已安装。输入 vp 打开面板。'
 echo '[OK] 输入 vp status 检查出站；输入 vp egress ipv4 / vp egress ipv6 切换 443。'
 echo '[提示] 这只是管理工具安装，不会更改 sing-box 配置或安装 BBR 内核。'
+echo '[OK] UTF-8 启动器校验通过（可直接使用 vp，无需设置环境变量）。'
