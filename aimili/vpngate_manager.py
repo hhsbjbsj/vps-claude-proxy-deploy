@@ -7296,9 +7296,23 @@ class Tee:
         Path(file_path).parent.mkdir(exist_ok=True, parents=True)
         self.file = open(file_path, "a", encoding="utf-8")
         self.stdout = sys.stdout
+        # Minimal VPS images or service overrides sometimes configure stdout as
+        # Latin-1. Journal/systemd logging must never crash the VPN manager.
+        try:
+            self.stdout.reconfigure(encoding="utf-8", errors="backslashreplace")
+        except (AttributeError, OSError, ValueError):
+            pass
 
     def write(self, data: str) -> None:
-        self.stdout.write(data)
+        try:
+            self.stdout.write(data)
+        except UnicodeEncodeError:
+            # Some file-like stdout streams cannot be reconfigured. Preserve
+            # Unicode in the UTF-8 application log while escaping journal text.
+            encoding = getattr(self.stdout, "encoding", None) or "ascii"
+            self.stdout.write(
+                data.encode(encoding, errors="backslashreplace").decode(encoding)
+            )
         self.file.write(data)
         self.file.flush()
 
