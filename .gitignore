@@ -1,0 +1,6 @@
+.env
+*.key
+*.pem
+*nodes*.txt
+ui_auth.json
+config.json
