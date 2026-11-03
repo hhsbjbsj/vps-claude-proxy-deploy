@@ -33,6 +33,35 @@ def cmd(argv: list[str], timeout: int = 30, check: bool = False) -> subprocess.C
                           timeout=timeout, check=check)
 
 
+def has_systemd() -> bool:
+    return Path('/run/systemd/system').is_dir() and shutil.which('systemctl') is not None
+
+
+def service_restart(name: str) -> subprocess.CompletedProcess:
+    if has_systemd():
+        return cmd(['systemctl', 'restart', name], timeout=30)
+    if shutil.which('rc-service'):
+        return cmd(['rc-service', name, 'restart'], timeout=30)
+    raise RuntimeError('既不是 systemd 也不是 OpenRC，无法管理服务。')
+
+
+def service_is_active(name: str) -> bool:
+    if has_systemd():
+        return cmd(['systemctl', 'is-active', '--quiet', name], timeout=5).returncode == 0
+    if shutil.which('rc-service'):
+        return cmd(['rc-service', name, 'status'], timeout=5).returncode == 0
+    return False
+
+
+def service_status(name: str) -> str:
+    if has_systemd():
+        c = cmd(['systemctl', 'is-active', name], timeout=5)
+        return c.stdout.strip() or 'inactive'
+    if shutil.which('rc-service'):
+        return 'active' if service_is_active(name) else 'inactive'
+    return 'unknown'
+
+
 def load() -> dict:
     if not CFG.is_file():
         raise RuntimeError('未发现 sing-box 配置；请先完成主部署。')
@@ -155,12 +184,12 @@ def switch(mode: str, address: str | None = None) -> None:
         shutil.copy2(CFG, backup)
         os.chmod(backup, 0o600)
         os.replace(tmp, CFG)
-        restart = cmd(['systemctl', 'restart', 'sing-box'], timeout=30)
+        restart = service_restart('sing-box')
         time.sleep(1)
-        active = cmd(['systemctl', 'is-active', '--quiet', 'sing-box'], timeout=5)
-        if restart.returncode or active.returncode:
+        active = service_is_active('sing-box')
+        if restart.returncode or not active:
             shutil.copy2(backup, CFG)
-            cmd(['systemctl', 'restart', 'sing-box'], timeout=30)
+            service_restart('sing-box')
             raise RuntimeError('新配置启动失败，已尝试回滚原配置。日志：\n' + restart.stderr[-1000:])
         print(f'成功：443 普通节点直连流量使用 {mode.upper()} 出口。')
         if address:
@@ -184,8 +213,7 @@ def run_status() -> None:
     except Exception as e:
         print('配置：' + str(e))
     for name in ('sing-box', 'aimilivpn'):
-        status = cmd(['systemctl', 'is-active', name], timeout=5)
-        print(f'{name}: {status.stdout.strip() or "unknown"}')
+        print(f'{name}: {service_status(name)}')
     print('IPv6 全局地址：' + (', '.join(ipv6_addresses()) or '无'))
     route6 = cmd(['ip', '-6', 'route', 'show', 'default'], timeout=5)
     print('IPv6 默认路由：' + (route6.stdout.strip() or '无'))
@@ -207,6 +235,15 @@ def bbr_menu() -> None:
     print('\n即将下载 byJoey/Actions-bbr-v3 官方脚本。')
     print('安装 BBR 内核可能影响系统引导、网络驱动，并需要重启。')
     print('此菜单不会自动安装内核或关闭 IPv6；后续操作由上游菜单决定。')
+    distro = {}
+    try:
+        for line in Path('/etc/os-release').read_text().splitlines():
+            if line.startswith('ID='):
+                distro['id'] = line.partition('=')[2].strip('"')
+    except OSError:
+        pass
+    if distro.get('id') not in ('debian', 'ubuntu'):
+        raise RuntimeError('byJoey BBRv3 内核安装器目前只支持 Debian/Ubuntu；此发行版不允许从 VP 菜单直接运行。')
     print('上游固定提交：' + BBR_REF)
     if input('输入 BBR 继续下载并打开上游菜单（其他输入取消）：').strip() != 'BBR':
         return
@@ -261,7 +298,7 @@ def menu() -> None:
         except Exception:
             mode = '配置不可识别'
         print('\n' + '='*50)
-        print(' VP · Ubuntu VPS 代理管理面板（终端版）')
+        print(' VP · Linux VPS 代理管理面板（终端版）')
         print(' 443 出站：' + mode + '   |   8443：严格住宅 TCP')
         print('='*50)
         print('1  运行状态、IPv4/IPv6 和住宅出口检查')
@@ -302,7 +339,13 @@ def menu() -> None:
                 print(path.read_text() if path.exists() else '没有找到节点链接。')
                 print('请勿公开分享这些含 UUID 和密钥参数的节点链接。')
             elif choice == '7':
-                subprocess.run(['journalctl','-u','sing-box','-n','50','--no-pager'],check=False)
+                if has_systemd():
+                    subprocess.run(['journalctl','-u','sing-box','-n','50','--no-pager'],check=False)
+                else:
+                    path = Path('/var/log/sing-box.err.log')
+                    if not path.exists():
+                        path = Path('/var/log/sing-box.log')
+                    subprocess.run(['tail','-n','50',str(path)],check=False)
             elif choice == '8':
                 update_manager()
             elif choice == '9':
