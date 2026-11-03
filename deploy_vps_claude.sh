@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Ubuntu VPS: sing-box 1.14.4 VLESS+REALITY + AI Mili VPNGate
+# Linux VPS (Debian, Ubuntu, Alpine, Fedora, and compatible RPM): sing-box + AI Mili VPNGate
 # 443 = split route, 8443 = strict TCP residential; no residential UDP fallback.
 set -Eeuo pipefail
 umask 077
@@ -9,11 +9,58 @@ fail() { echo "[ERROR] $*" >&2; exit 1; }
 info() { printf '\n\033[1;34m==> %s\033[0m\n' "$*"; }
 trap 'echo "[ERROR] Failed at line ${LINENO}. Check the output above." >&2' ERR
 
-[[ $EUID -eq 0 ]] || fail "Use sudo bash deploy_vps_claude.sh"
+[[ $EUID -eq 0 ]] || fail "Run as root (sudo bash deploy_vps_claude.sh)"
+[[ -r /etc/os-release ]] || fail "Cannot detect Linux distribution (/etc/os-release missing)."
 source /etc/os-release
-[[ ${ID:-} == ubuntu ]] || fail "This script is for Ubuntu only (detected: ${ID:-unknown})."
-[[ -d /run/systemd/system ]] || fail "systemd not found."
+case "${ID:-unknown}" in
+  ubuntu|debian)
+    distro_family=apt
+    distro_service=systemd
+    ;;
+  alpine)
+    distro_family=apk
+    distro_service=openrc
+    ;;
+  fedora|rocky|almalinux|rhel|centos|ol|amzn)
+    distro_family=rpm
+    distro_service=systemd
+    ;;
+  *)
+    fail "Unsupported Linux distribution: ${ID:-unknown}. Supported: Debian, Ubuntu, Alpine/OpenRC, Fedora and compatible RPM systemd distributions."
+    ;;
+esac
+info "Detected distro: ${PRETTY_NAME:-$ID}; package family: $distro_family; service: $distro_service"
+if [[ ${1:-} == --preflight ]]; then
+  echo "Preflight only: no packages, configurations, or services have been changed."
+  if [[ -c /dev/net/tun ]]; then echo 'TUN: present'; else echo 'TUN: missing (required for full deployment)'; fi
+  if command -v python3 >/dev/null; then python3 --version; else echo 'Python 3: not installed (installer will install; requires >=3.10)'; fi
+  if [[ $distro_service == systemd ]]; then
+    [[ -d /run/systemd/system ]] && echo 'systemd: running' || echo 'systemd: not running (required)'
+  else
+    command -v rc-service >/dev/null && echo 'OpenRC command: present' || echo 'OpenRC command: missing (required)'
+  fi
+  exit 0
+fi
+[[ $# == 0 ]] || fail "Unknown argument: $1 (supported: --preflight)."
+if [[ $distro_service == systemd ]]; then
+  [[ -d /run/systemd/system ]] || fail "systemd is not running; container/shared host? This installer requires a real service manager."
+else
+  command -v rc-service >/dev/null 2>&1 && command -v rc-update >/dev/null 2>&1 || fail "OpenRC tools not found."
+fi
 [[ -c /dev/net/tun ]] || fail "Missing /dev/net/tun: enable TUN/TAP in your VPS control panel before installation."
+
+svc_enable() {
+  if [[ $distro_service == systemd ]]; then systemctl enable --now "$1"; else rc-update add "$1" default && rc-service "$1" start; fi
+}
+svc_restart() {
+  if [[ $distro_service == systemd ]]; then systemctl restart "$1"; else rc-service "$1" restart; fi
+}
+svc_active() {
+  if [[ $distro_service == systemd ]]; then systemctl is-active --quiet "$1"; else rc-service "$1" status >/dev/null 2>&1; fi
+}
+svc_status() {
+  if svc_active "$1"; then echo "$1: active"; else echo "$1: inactive"; fi
+}
 
 case "$(uname -m)" in
   x86_64) arch=amd64; checksum=699a1b510aa4396b2176d32d1181920399ebf1e267835da6f3b598d0f7c24968 ;;
@@ -30,9 +77,39 @@ for p in 443 8443 7928 8787; do
   fi
 done
 
-info "Installing Ubuntu dependencies"
-apt-get update
-apt-get install -y ca-certificates curl git iproute2 iptables openssl python3 openvpn psmisc tar
+info "Installing Linux dependencies ($distro_family)"
+case "$distro_family" in
+  apt)
+    apt-get update
+    apt-get install -y ca-certificates curl git iproute2 iptables openssl python3 openvpn psmisc tar
+    ;;
+  apk)
+    apk update
+    apk add bash ca-certificates curl git iproute2 iptables openssl python3 openvpn psmisc tar coreutils
+    ;;
+  rpm)
+    if command -v dnf >/dev/null 2>&1; then pkg=dnf
+    elif command -v yum >/dev/null 2>&1; then pkg=yum
+    else fail "RPM distribution has neither dnf nor yum."
+    fi
+    if [[ "$ID" != fedora && "$ID" != amzn ]]; then
+      "$pkg" install -y epel-release || echo '[WARN] EPEL not directly available; trying the configured repositories.'
+    fi
+    "$pkg" install -y ca-certificates curl git iproute iptables openssl python3 openvpn psmisc tar
+    ;;
+esac
+python3 - <<'PY'
+import sys
+if sys.version_info < (3, 10):
+    raise SystemExit(
+        "AI Mili requires Python >= 3.10; detected {}.{}. "
+        "On this distribution, install a supported system Python before deploying. "
+        "No sing-box configuration has been written.".format(*sys.version_info[:2])
+    )
+print("Python compatibility: {}.{}".format(*sys.version_info[:2]))
+PY
+command -v openvpn >/dev/null || fail "openvpn package not installed; check software repositories (EPEL may be needed on RPM systems)."
+
 
 info "Checking public IPv4"
 PUBLIC_IP="${PUBLIC_IP:-$(curl -4fsS --connect-timeout 5 --max-time 15 https://api.ipify.org || true)}"
@@ -118,8 +195,9 @@ with os.fdopen(fd, "w", encoding="utf-8") as f:
 PY
 sing-box check -c /etc/sing-box/config.json || fail "sing-box config validation failed."
 
-info "Installing sing-box service"
-cat > /etc/systemd/system/sing-box.service <<'EOF'
+info "Installing sing-box $distro_service service"
+if [[ $distro_service == systemd ]]; then
+  cat > /etc/systemd/system/sing-box.service <<'EOF'
 [Unit]
 Description=sing-box VLESS Reality proxy
 Documentation=https://sing-box.sagernet.org/
@@ -137,9 +215,23 @@ LimitNOFILE=1048576
 [Install]
 WantedBy=multi-user.target
 EOF
-systemctl daemon-reload
-systemctl enable --now sing-box
-systemctl is-active --quiet sing-box || fail "sing-box failed. Inspect: journalctl -u sing-box -n 80"
+  systemctl daemon-reload
+else
+  cat > /etc/init.d/sing-box <<'EOF'
+#!/sbin/openrc-run
+description="sing-box VLESS Reality proxy"
+command="/usr/local/bin/sing-box"
+command_args="run -c /etc/sing-box/config.json"
+command_background="yes"
+pidfile="/run/sing-box.pid"
+output_log="/var/log/sing-box.log"
+error_log="/var/log/sing-box.err.log"
+depend() { need net; after firewall; }
+EOF
+  chmod 755 /etc/init.d/sing-box
+fi
+svc_enable sing-box
+svc_active sing-box || fail "sing-box service failed to start. Check journalctl (systemd) or /var/log/sing-box.err.log (OpenRC)."
 
 # Bind AI Mili Web UI to the public IPv4 interface, while keeping SOCKS5 loopback-only.
 info "Preparing AI Mili installer with a public IPv4 control panel"
@@ -158,8 +250,8 @@ info "Installing AI Mili (may fetch a free VPNGate node automatically)"
 AIMILIVPN_NONINTERACTIVE=1 bash "$work/aimili-install.sh"
 
 info "Checking local services"
-systemctl is-active sing-box || true
-systemctl is-active aimilivpn || true
+svc_status sing-box
+svc_status aimilivpn
 ss -lntp | grep -E ':(443|8443|7928|8787)\b' || true
 
 # Ensure that the management UI uses the requested public IPv4 bind.
@@ -174,13 +266,17 @@ if data.get('host') != '0.0.0.0':
     with open(tmp,'w') as f: json.dump(data,f,indent=2)
     os.chmod(tmp,0o600); os.replace(tmp,p)
 PY
-  systemctl restart aimilivpn || true
+  svc_restart aimilivpn || true
 fi
 
 if command -v ufw >/dev/null && ufw status 2>/dev/null | grep -q 'Status: active'; then
   ufw allow 443/tcp
   ufw allow 8443/tcp
   ufw allow 8787/tcp
+fi
+if command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state 2>/dev/null | grep -qx running; then
+  for p in 443 8443 8787; do firewall-cmd --permanent --add-port="$p/tcp" || true; done
+  firewall-cmd --reload || true
 fi
 
 info "Integrating strict residential-only AimiliVPN selection"
