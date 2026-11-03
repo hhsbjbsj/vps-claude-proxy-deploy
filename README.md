@@ -14,6 +14,25 @@
 PYTHONIOENCODING=utf-8:backslashreplace vp status
 ```
 
+如果升级后 **`/usr/local/bin/vp` 可用，但直接输入 `vp` 仍显示 Latin-1 报错**，优先排查登录 Shell 中已有的同名 alias、function 或旧命令路径；更新子进程不能清除当前 Shell 中缓存的命令解析。运行：
+
+```bash
+type -a vp
+sed -n '1,8p' /usr/local/bin/vp
+/usr/local/bin/vp status
+```
+
+若直接运行 `/usr/local/bin/vp status` 正常，则可以在**当前 Shell** 中尝试：
+
+```bash
+unalias vp 2>/dev/null || true
+unset -f vp 2>/dev/null || true
+hash -r
+vp status
+```
+
+若绝对路径仍报错，但 `PYTHONIOENCODING=utf-8:backslashreplace /usr/local/bin/vp status` 正常，请保留报错信息继续诊断，不必重新部署代理。
+
 永久更新 `vp` 管理器（不会修改 sing-box、AI Mili 或 Karing 节点密钥）：
 
 ```bash
