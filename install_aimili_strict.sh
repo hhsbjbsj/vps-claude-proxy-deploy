@@ -38,6 +38,31 @@ cp -a "$APP" "$BACKUP_APP"
 cp -a "$AUTH" "$BACKUP_AUTH"
 chmod 600 "$BACKUP_APP" "$BACKUP_AUTH"
 
+echo '==> 配置持久保护：避免上游 ml update 静默覆盖严格筛选...'
+PINNED_DIR=/usr/local/share/vp/aimili
+PINNED="$PINNED_DIR/vpngate_manager.py"
+GUARD=/usr/local/libexec/vp-aimili-guard
+DROPIN=/etc/systemd/system/aimilivpn.service.d/10-vp-strict.conf
+install -d -m 755 "$PINNED_DIR" /usr/local/libexec /etc/systemd/system/aimilivpn.service.d
+install -m 644 "$WORK/vpngate_manager.py" "$PINNED"
+cat > "$GUARD" <<'GUARD'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+# Only pair the patched manager with the reviewed Aimili 2.1.5 dependency version.
+[[ -f /opt/aimilivpn/VERSION ]] || { echo '[VP] Missing Aimili version file' >&2; exit 1; }
+[[ "$(cat /opt/aimilivpn/VERSION)" == "2.1.5" ]] || {
+  echo '[VP] Aimili version changed; strict-residential guard refuses unsafe startup.' >&2
+  exit 1
+}
+install -m 644 /usr/local/share/vp/aimili/vpngate_manager.py /opt/aimilivpn/vpngate_manager.py
+GUARD
+chmod 755 "$GUARD"
+cat > "$DROPIN" <<'DROPIN'
+[Service]
+ExecStartPre=/usr/local/libexec/vp-aimili-guard
+DROPIN
+chmod 644 "$DROPIN"
+systemctl daemon-reload
 echo '==> 启用严格住宅筛选，保留已有面板地址及登录凭据...'
 install -m 644 "$WORK/vpngate_manager.py" "$APP"
 python3 - "$AUTH" <<'PY'
@@ -63,6 +88,8 @@ PY
 echo '==> 重启 AimiliVPN（sing-box 配置和密钥不变）...'
 if ! systemctl restart aimilivpn; then
   echo '[ERROR] 重启失败，尝试恢复旧版程序和配置。' >&2
+  rm -f "$DROPIN" "$GUARD" "$PINNED"
+  systemctl daemon-reload || true
   cp -a "$BACKUP_APP" "$APP"
   cp -a "$BACKUP_AUTH" "$AUTH"
   systemctl restart aimilivpn || true
@@ -71,6 +98,8 @@ fi
 sleep 3
 if ! systemctl is-active --quiet aimilivpn; then
   echo '[ERROR] AimiliVPN 未保持运行，正在回滚。' >&2
+  rm -f "$DROPIN" "$GUARD" "$PINNED"
+  systemctl daemon-reload || true
   cp -a "$BACKUP_APP" "$APP"
   cp -a "$BACKUP_AUTH" "$AUTH"
   systemctl restart aimilivpn || true
@@ -82,4 +111,5 @@ echo '[OK] 未修改 sing-box 443 / 8443 入口，也未修改 7928 / 8787 端�
 echo '[说明] 仅接受 ip_type=residential 且 confidence=medium/high 的候选；连接后复核实际出口。'
 echo '[说明] 如果无符合条件的出口，代理可能不可用；不会为此改用未知/移动/机房节点。'
 echo "[备份] $BACKUP_DIR"
-echo '[注意] 上游 ml update 可能覆盖修改；需要时重新运行 vp 菜单中的严格住宅安装项。'
+echo '[保护] 上游 ml update 若仍为 Aimili 2.1.5，systemd 启动时会恢复本修改版。'
+echo '[保护] 若上游版本变化，服务拒绝启动以避免悄悄失去严格住宅保障；需先更新本修改版。'
