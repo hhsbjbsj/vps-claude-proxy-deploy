@@ -14,7 +14,22 @@ grep -q 'DEFAULT_APP_VERSION = "2.1.5"' "$APP" || {
 command -v curl >/dev/null && command -v python3 >/dev/null || {
   echo '[ERROR] 缺少 curl 或 Python 3。' >&2; exit 1
 }
-command -v systemctl >/dev/null || { echo '[ERROR] 当前不是 systemd 系统。' >&2; exit 1; }
+if [[ -d /run/systemd/system ]] && command -v systemctl >/dev/null; then
+  SERVICE_MGR=systemd
+elif command -v rc-service >/dev/null && [[ -f /etc/init.d/aimilivpn ]]; then
+  SERVICE_MGR=openrc
+else
+  echo '[ERROR] 需要正在运行的 systemd 或已安装的 Aimili OpenRC 服务。' >&2
+  exit 1
+fi
+
+svc_restart() {
+  if [[ $SERVICE_MGR == systemd ]]; then systemctl restart aimilivpn; else rc-service aimilivpn restart; fi
+}
+svc_active() {
+  if [[ $SERVICE_MGR == systemd ]]; then systemctl is-active --quiet aimilivpn; else rc-service aimilivpn status >/dev/null 2>&1; fi
+}
+
 
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
@@ -43,7 +58,15 @@ PINNED_DIR=/usr/local/share/vp/aimili
 PINNED="$PINNED_DIR/vpngate_manager.py"
 GUARD=/usr/local/libexec/vp-aimili-guard
 DROPIN=/etc/systemd/system/aimilivpn.service.d/10-vp-strict.conf
-install -d -m 755 "$PINNED_DIR" /usr/local/libexec /etc/systemd/system/aimilivpn.service.d
+OPENRC_INIT=/etc/init.d/aimilivpn
+OPENRC_BACKUP="$BACKUP_DIR/aimilivpn.init.$STAMP"
+install -d -m 755 "$PINNED_DIR" /usr/local/libexec
+if [[ $SERVICE_MGR == systemd ]]; then
+  install -d -m 755 /etc/systemd/system/aimilivpn.service.d
+else
+  cp -a "$OPENRC_INIT" "$OPENRC_BACKUP"
+  chmod 600 "$OPENRC_BACKUP"
+fi
 install -m 644 "$WORK/vpngate_manager.py" "$PINNED"
 cat > "$GUARD" <<'GUARD'
 #!/usr/bin/env bash
@@ -57,12 +80,31 @@ set -Eeuo pipefail
 install -m 644 /usr/local/share/vp/aimili/vpngate_manager.py /opt/aimilivpn/vpngate_manager.py
 GUARD
 chmod 755 "$GUARD"
-cat > "$DROPIN" <<'DROPIN'
+if [[ $SERVICE_MGR == systemd ]]; then
+  cat > "$DROPIN" <<'DROPIN'
 [Service]
 ExecStartPre=/usr/local/libexec/vp-aimili-guard
 DROPIN
-chmod 644 "$DROPIN"
-systemctl daemon-reload
+  chmod 644 "$DROPIN"
+  systemctl daemon-reload
+else
+  if ! grep -qF 'start_pre() { /usr/local/libexec/vp-aimili-guard; }' "$OPENRC_INIT"; then
+    cat >> "$OPENRC_INIT" <<'OPENRC_HOOK'
+# VP strict residential: check manager version before service start.
+start_pre() { /usr/local/libexec/vp-aimili-guard; }
+OPENRC_HOOK
+  fi
+fi
+rollback_guard() {
+  if [[ $SERVICE_MGR == systemd ]]; then
+    rm -f "$DROPIN"
+    systemctl daemon-reload || true
+  else
+    cp -a "$OPENRC_BACKUP" "$OPENRC_INIT"
+  fi
+  rm -f "$GUARD" "$PINNED"
+}
+
 echo '==> 启用严格住宅筛选，保留已有面板地址及登录凭据...'
 install -m 644 "$WORK/vpngate_manager.py" "$APP"
 python3 - "$AUTH" <<'PY'
@@ -86,23 +128,21 @@ finally:
 PY
 
 echo '==> 重启 AimiliVPN（sing-box 配置和密钥不变）...'
-if ! systemctl restart aimilivpn; then
+if ! svc_restart; then
   echo '[ERROR] 重启失败，尝试恢复旧版程序和配置。' >&2
-  rm -f "$DROPIN" "$GUARD" "$PINNED"
-  systemctl daemon-reload || true
+  rollback_guard
   cp -a "$BACKUP_APP" "$APP"
   cp -a "$BACKUP_AUTH" "$AUTH"
-  systemctl restart aimilivpn || true
+  svc_restart || true
   exit 1
 fi
 sleep 3
-if ! systemctl is-active --quiet aimilivpn; then
+if ! svc_active; then
   echo '[ERROR] AimiliVPN 未保持运行，正在回滚。' >&2
-  rm -f "$DROPIN" "$GUARD" "$PINNED"
-  systemctl daemon-reload || true
+  rollback_guard
   cp -a "$BACKUP_APP" "$APP"
   cp -a "$BACKUP_AUTH" "$AUTH"
-  systemctl restart aimilivpn || true
+  svc_restart || true
   exit 1
 fi
 
@@ -111,5 +151,6 @@ echo '[OK] 未修改 sing-box 443 / 8443 入口，也未修改 7928 / 8787 端�
 echo '[说明] 仅接受 ip_type=residential 且 confidence=medium/high 的候选；连接后复核实际出口。'
 echo '[说明] 如果无符合条件的出口，代理可能不可用；不会为此改用未知/移动/机房节点。'
 echo "[备份] $BACKUP_DIR"
-echo '[保护] 上游 ml update 若仍为 Aimili 2.1.5，systemd 启动时会恢复本修改版。'
+echo '[保护] 服务启动时会核验上游版本，并恢复所部署的严格住宅修改版。'
+if [[ $SERVICE_MGR == openrc ]]; then echo '[注意] OpenRC 原版 ml update 可能覆盖 init 脚本中的保护钩子；更新后应重新运行本安装器。'; fi
 echo '[保护] 若上游版本变化，服务拒绝启动以避免悄悄失去严格住宅保障；需先更新本修改版。'
