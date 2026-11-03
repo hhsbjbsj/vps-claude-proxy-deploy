@@ -27,7 +27,7 @@
 **第 1 步：安装下载工具**
 
 ```bash
-apt-get update && apt-get install -y curl ca-certificates
+apt-get update && apt-get install -y curl ca-certificates less
 ```
 
 **第 2 步：下载主部署脚本**
