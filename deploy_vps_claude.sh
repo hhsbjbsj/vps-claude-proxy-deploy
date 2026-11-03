@@ -29,6 +29,30 @@ case "${ID:-unknown}" in
     fail "Unsupported Linux distribution: ${ID:-unknown}. Supported: Debian, Ubuntu, Alpine/OpenRC, Fedora and compatible RPM systemd distributions."
     ;;
 esac
+check_apt_sources() {
+  [[ "$distro_family" == apt ]] || return 0
+  # This parses all enabled APT source files without updating package lists or networking.
+  # Do not edit third-party repositories automatically: they may be needed by existing users.
+  local diagnostics
+  if diagnostics="$(apt-get indextargets 2>&1 >/dev/null)"; then
+    echo "APT source syntax: OK"
+    return 0
+  fi
+  printf '%s\n' "$diagnostics" >&2
+  cat >&2 <<'HELP'
+[ERROR] APT sources cannot be parsed. This problem predates VPS deployment.
+Inspect the file named in the error under /etc/apt/sources.list.d/.
+For example, when the error names sagernet.sources:
+  cat /etc/apt/sources.list.d/sagernet.sources
+  mv /etc/apt/sources.list.d/sagernet.sources /etc/apt/sources.list.d/sagernet.sources.disabled
+  apt-get update
+Disable ONLY the invalid third-party file; do not delete default Debian/Ubuntu sources.
+The script will NOT change APT repositories for you.
+HELP
+  return 1
+}
+check_apt_sources || fail "APT repository validation failed; repair the reported source and retry."
+
 info "Detected distro: ${PRETTY_NAME:-$ID}; package family: $distro_family; service: $distro_service"
 if [[ ${1:-} == --preflight ]]; then
   echo "Preflight only: no packages, configurations, or services have been changed."
