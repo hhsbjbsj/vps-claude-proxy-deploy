@@ -65,3 +65,24 @@ jobs:
             bash -n /repo/deploy_vps_claude.sh
             bash /repo/deploy_vps_claude.sh --preflight
           '
+
+  apt-broken-source:
+    name: Detect malformed third-party Debian APT source
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ensure preflight refuses malformed repository without modifying sources
+        shell: bash
+        run: |
+          docker run --rm -v "$PWD:/repo:ro" debian:13 sh -ec '
+            printf "Types: deb\nURIs: not-an-uri\nSuites: trixie\nComponents: main\n" > /etc/apt/sources.list.d/sagernet.sources
+            if bash /repo/deploy_vps_claude.sh --preflight > /tmp/preflight.log 2>&1; then
+              echo "Preflight unexpectedly accepted a malformed source"
+              cat /tmp/preflight.log
+              exit 1
+            fi
+            cat /tmp/preflight.log
+            grep -q "APT repository validation failed" /tmp/preflight.log
+            grep -q "sagernet.sources" /tmp/preflight.log
+            test -f /etc/apt/sources.list.d/sagernet.sources
+          '
