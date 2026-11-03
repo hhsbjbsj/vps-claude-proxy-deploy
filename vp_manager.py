@@ -166,7 +166,7 @@ def switch(mode: str, address: str | None = None) -> None:
 
     updated = copy.deepcopy(cfg)
     rules = updated['route'].setdefault('rules', [])
-    # Preserve the original split routing order, including the Claude -> Aimili rules.
+    # Preserve existing custom routes and the independent 8443 residential entry.
     rules[:] = [rule for rule in rules if not is_managed_rule(rule)]
     rules.append({'inbound': MANAGED_INBOUND, 'action': 'resolve',
                   'server': 'local-dns',
@@ -208,7 +208,7 @@ def switch(mode: str, address: str | None = None) -> None:
         print(f'成功：443 普通节点直连流量使用 {mode.upper()} 出口。')
         if address:
             print('绑定源 IPv6 地址：' + address)
-        print('Claude 命中的连接仍通过 AI Mili；8443 严格住宅节点不变。')
+        print('443 主入口按出站策略直连，包括 Claude；8443 独立住宅入口保持不变。')
         print('配置备份：' + str(backup))
         print('注意：原有连接可能在 sing-box 重启时中断；只对新连接生效。')
     finally:
