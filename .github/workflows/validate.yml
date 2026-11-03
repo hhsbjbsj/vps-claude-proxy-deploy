@@ -14,6 +14,7 @@ jobs:
           bash -n deploy_vps_claude.sh
           bash -n install_manager.sh
           bash -n install_aimili_strict.sh
+          bash -n resume_deploy.sh
       - name: Check Python sources
         run: |
           python3 -m py_compile vp_manager.py
