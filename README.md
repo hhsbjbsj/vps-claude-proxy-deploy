@@ -29,6 +29,39 @@
 
 若已有 `/etc/sing-box/config.json` 或 `/opt/aimilivpn`，主部署器会拒绝覆盖。更新已有服务器请使用 `vp` 管理菜单，不要重新执行首次安装。
 
+## Debian / Ubuntu 常见故障：APT 软件源配置损坏
+
+如果尚未运行本项目的安装脚本，执行 \`apt-get update\` 就出现：
+
+\`\`\`text
+E: Malformed entry 1 in sources file /etc/apt/sources.list.d/sagernet.sources (URI)
+E: The list of sources could not be read.
+\`\`\`
+
+说明**系统中已存在格式错误的第三方软件源**，APT 不能解析其地址。这不是切换到 \`apk\` 或 \`dnf\` 能解决的；Debian/Ubuntu 始终使用 \`apt-get\`。
+
+先查看文件：
+
+\`\`\`bash
+cat /etc/apt/sources.list.d/sagernet.sources
+\`\`\`
+
+确认报错指向该文件后，保留备份、暂时禁用它：
+
+\`\`\`bash
+mv /etc/apt/sources.list.d/sagernet.sources /etc/apt/sources.list.d/sagernet.sources.disabled
+\`\`\`
+
+重新运行：
+
+\`\`\`bash
+apt-get update && apt-get install -y bash curl ca-certificates less
+\`\`\`
+
+**仅停用报错点名的损坏文件，不要删除系统原生的 Debian/Ubuntu 软件源，也不要执行 \`rm -rf /etc/apt\`。** 如果下一次报错指向其他文件，请针对新的错误检查，不要盲目批量禁用。
+
+**现在部署器的 \`--preflight\` 会使用 \`apt-get indextargets\` 只做本地源文件语法解析**：发现格式损坏会直接解释原因并中止，不会自动篡改现有软件源，也不需要访问网络。
+
 ## 全新 VPS：首次一键安装（请先做这一步）
 
 **第一步：根据发行版安装下载工具**。所有命令都是完整的一行，避免因为反斜杠换行复制出错。
