@@ -127,22 +127,46 @@ finally:
         os.unlink(temp)
 PY
 
+collect_diagnostics() {
+  local file="$BACKUP_DIR/aimili-failed.$STAMP.log"
+  if [[ $SERVICE_MGR == systemd ]]; then
+    { systemctl status aimilivpn --no-pager -l || true
+      echo '===== journalctl ====='
+      journalctl -u aimilivpn -n 100 --no-pager || true
+      echo '===== service unit ====='
+      systemctl cat aimilivpn || true
+    } > "$file" 2>&1
+  else
+    { rc-service aimilivpn status || true
+      echo '===== OpenRC error log ====='
+      tail -n 100 /var/log/aimilivpn* 2>/dev/null || true
+    } > "$file" 2>&1
+  fi
+  chmod 600 "$file"
+  echo "[诊断] 已保存失败日志（可能包含敏感信息，请打码后分享）：$file" >&2
+}
+recover_previous() {
+  rollback_guard
+  cp -a "$BACKUP_APP" "$APP"
+  cp -a "$BACKUP_AUTH" "$AUTH"
+  if svc_restart && svc_active; then
+    echo '[回滚] 原版 AimiliVPN 已恢复运行；严格住宅功能未生效。' >&2
+  else
+    echo '[警告] 回滚后原版 AimiliVPN 仍未运行！请查看日志，避免直接重跑安装。' >&2
+  fi
+}
 echo '==> 重启 AimiliVPN（sing-box 配置和密钥不变）...'
 if ! svc_restart; then
-  echo '[ERROR] 重启失败，尝试恢复旧版程序和配置。' >&2
-  rollback_guard
-  cp -a "$BACKUP_APP" "$APP"
-  cp -a "$BACKUP_AUTH" "$AUTH"
-  svc_restart || true
+  echo '[ERROR] 修改版服务重启失败，先记录日志再回滚。' >&2
+  collect_diagnostics
+  recover_previous
   exit 1
 fi
-sleep 3
+sleep 8
 if ! svc_active; then
-  echo '[ERROR] AimiliVPN 未保持运行，正在回滚。' >&2
-  rollback_guard
-  cp -a "$BACKUP_APP" "$APP"
-  cp -a "$BACKUP_AUTH" "$AUTH"
-  svc_restart || true
+  echo '[ERROR] 修改版 AimiliVPN 没有保持运行，先记录日志再回滚。' >&2
+  collect_diagnostics
+  recover_previous
   exit 1
 fi
 
