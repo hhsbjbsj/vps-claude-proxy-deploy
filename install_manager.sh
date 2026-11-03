@@ -20,6 +20,8 @@ install -d -m 755 /usr/local/libexec
 install -m 755 "$WORK/vp_manager.py" "$TARGET"
 cat > "$WORK/vp" <<'EOF'
 #!/usr/bin/env bash
+# Force UTF-8 for Chinese menu output even if the VPS login environment is Latin-1.
+export PYTHONIOENCODING=utf-8:backslashreplace
 exec /usr/bin/python3 /usr/local/libexec/vp_manager.py "$@"
 EOF
 install -m 755 "$WORK/vp" "$WRAPPER"
