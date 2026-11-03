@@ -84,8 +84,12 @@ def load() -> dict:
     outs = {x.get('tag'): x for x in cfg.get('outbounds', [])}
     if 'normal-443' not in ins or 'backup-8443' not in ins:
         raise RuntimeError('不是 no-aimili 分支的 443/8443 配置；拒绝修改其他项目的节点。')
-    if outs.get('vps-direct', {}).get('type') != 'direct':
-        raise RuntimeError('缺少本项目的 vps-direct 出站；已停止。')
+    if outs.get('vps-direct', {}).get('type') != 'direct' or outs.get('backup-direct', {}).get('type') != 'direct':
+        raise RuntimeError('需要两个独立 VPS 直连出站；拒绝修改未识别配置。')
+    if not any(r.get('inbound') == ['backup-8443'] and r.get('action') == 'route'
+               and r.get('outbound') == 'backup-direct'
+               for r in cfg.get('route', {}).get('rules', [])):
+        raise RuntimeError('缺少备用 8443 的独立路由；为保护备用节点，已停止。')
     if cfg.get('route', {}).get('final') != 'vps-direct':
         raise RuntimeError('默认出站已自定义，不能自动切换 IPv4/IPv6。')
     return cfg
