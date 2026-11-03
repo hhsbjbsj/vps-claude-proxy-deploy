@@ -207,3 +207,15 @@ echo '8443: all TCP through AI Mili; UDP rejected; no fallback to VPS direct.'
 echo 'Keep Karing TUN & DNS routing configured. 8443 is best for fail-closed sensitive traffic.'
 echo 'In provider firewall/security group, allow inbound TCP 443, 8443, and 8787.'
 echo 'VPNGate public exit IP may change. No stable IP or account access is guaranteed.'
+
+info "Installing VP terminal manager (non-destructive)"
+if curl -fL --retry 3 --connect-timeout 10 --max-time 60 -o "$work/install_manager.sh" \
+  https://raw.githubusercontent.com/hhsbjbsj/vps-claude-proxy-deploy/main/install_manager.sh; then
+  if bash "$work/install_manager.sh"; then
+    echo '[OK] Run vp anytime to open the menu. BBRv3 integration is optional.'
+  else
+    echo '[WARN] VP menu installer failed; core proxy deployment is still complete.'
+  fi
+else
+  echo '[WARN] Cannot fetch VP menu installer. Retry installation separately from GitHub.'
+fi
