@@ -183,6 +183,13 @@ if command -v ufw >/dev/null && ufw status 2>/dev/null | grep -q 'Status: active
   ufw allow 8787/tcp
 fi
 
+info "Integrating strict residential-only AimiliVPN selection"
+curl -fL --retry 3 --connect-timeout 10 --max-time 90 \
+  -o "$work/install_aimili_strict.sh" \
+  https://raw.githubusercontent.com/hhsbjbsj/vps-claude-proxy-deploy/main/install_aimili_strict.sh
+bash -n "$work/install_aimili_strict.sh"
+bash "$work/install_aimili_strict.sh" || fail "Strict residential Aimili integration failed. Do not assume the exit is residential."
+
 info "Saving Karing import links (root-only)"
 link_base="vless://${UUID}@${PUBLIC_IP}"
 query="encryption=none&security=reality&sni=${SNI}&fp=chrome&pbk=${PUBLIC_KEY}&sid=${SHORT_ID}&type=tcp&flow=xtls-rprx-vision"
