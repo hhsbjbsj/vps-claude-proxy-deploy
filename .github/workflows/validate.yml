@@ -45,7 +45,7 @@ jobs:
           - ubuntu:24.04
           - alpine:3.21
           - fedora:42
-          - rockylinux:10
+          - rockylinux/rockylinux:10
     steps:
       - uses: actions/checkout@v4
       - name: Check OS and package family without changing system
