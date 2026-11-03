@@ -116,6 +116,34 @@ bash /root/deploy.sh
 
 如果不能自动获取公网 IPv4，确认真实公网地址后运行 `PUBLIC_IP=你的公网IPv4 bash /root/deploy.sh`。主脚本为防止覆盖旧密钥和配置，不会直接重装已有的 sing-box / AI Mili；中断时先查日志、不要直接删除配置。
 
+## 部署中断恢复（不用重装 VPS 或更换节点密钥）
+
+如果首次部署完成了 sing-box 安装（\`systemctl is-active sing-box\` 为 \`active\`），但是 AI Mili 在严格住宅集成步骤报错，主脚本可能还没执行到保存 Karing 链接和安装 \`vp\` 菜单。**不要再次执行主部署脚本，也不要删除 \`/etc/sing-box/config.json\`。**
+
+本仓库提供单独的断点续装脚本 \`resume_deploy.sh\`。它会验证本项目 443/8443 配置，修复 AI Mili 严格住宅集成，从既有 REALITY 私钥**推导已有公钥**来恢复节点链接，并补装 \`vp\`；不会重新生成 UUID / REALITY 私钥，不会覆盖已有 \`/root/karing-nodes.txt\`。
+
+在 Debian / Ubuntu 等 systemd 系统发生 AI Mili 无限重启时，先执行：
+
+\`\`\`bash
+systemctl stop aimilivpn
+\`\`\`
+
+然后下载并运行：
+
+\`\`\`bash
+curl -fL --retry 3 -o /root/resume_deploy.sh https://raw.githubusercontent.com/hhsbjbsj/vps-claude-proxy-deploy/main/resume_deploy.sh
+\`\`\`
+
+\`\`\`bash
+bash -n /root/resume_deploy.sh && bash /root/resume_deploy.sh
+\`\`\`
+
+脚本**只适用于本仓库生成的配置**（入站标签 \`normal-443\` / \`strict-8443\`）；已有其他项目的 sing-box 配置会被拒绝。即使续装成功，AI Mili 是否连接到真实可用的 VPNGate 住宅出口仍需单独验证。
+
+### Debian 13 最小化系统的 AI Mili 字符编码报错
+
+如果日志出现 \`UnicodeEncodeError: 'latin-1' codec can't encode characters\`，原因是原版 AI Mili 将中文日志输出到 Latin-1 的 systemd 标准输出。仓库中的 AI Mili 修改版已经加入 UTF-8 输出和回退处理；严格住宅安装器还会设置 \`PYTHONIOENCODING=utf-8:backslashreplace\`。不用为此升级 Python 或重装 Debian。详见 \`tests/test_aimili_encoding.py\`。
+
 ## 首次安装完成后：逐项验收（不是安装命令）
 
 只有第 4 步安装结束、没有出现 `[ERROR]` / `FATAL` 后，才执行以下命令。保持一条一条运行，避免终端复制时把不同命令拼在一起。
