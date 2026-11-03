@@ -60,3 +60,44 @@ AI Mili 管理面板默认公网监听。在浏览器打开 `http://你的VPS公
 ## 上游项目
 
 [sing-box](https://github.com/SagerNet/sing-box) · [AI Mili VPNGate](https://github.com/baoweise-bot/aimili-vpngate)
+
+## 常驻 VPS 管理面板（vp）
+
+这个项目新增了**终端交互管理面板**。安装一次以后，重启系统或重新登录 SSH 也可以随时输入 `vp` 召唤；它不是需要开放公网端口的独立 Web 站点。AI Mili 的 8787 Web 管理后台仍保持原有配置。
+
+已经安装过本项目的 VPS，**不要再次运行 `deploy_vps_claude.sh`**，而是单独安装常驻菜单（以下每条都是完整的单行命令）：
+
+```bash
+curl -fL --retry 3 -o /root/install_manager.sh https://raw.githubusercontent.com/hhsbjbsj/vps-claude-proxy-deploy/main/install_manager.sh
+bash -n /root/install_manager.sh
+bash /root/install_manager.sh
+vp
+```
+
+以后新装 VPS，主部署脚本完成后会自动尝试安装 `vp`。
+
+菜单包括：状态检查、443 普通节点 IPv4-only/IPv6-only 出口切换、选择本机 IPv6 源地址、AI Mili 菜单、BBRv3 官方菜单、节点链接、日志及菜单更新。也支持无需进入交互菜单的命令：
+
+```bash
+vp status
+vp egress ipv4
+vp egress ipv6
+vp egress ipv6 --source-ipv6 你的公网IPv6
+vp bbr
+vp update
+```
+
+### IPv6 出口切换范围与限制
+
+- 切换的是 **443 普通节点的 VPS 直连出站**，不是 443 的连接入口地址，也不是 VPS 系统全局 IPv6 开关。
+- Claude 域名匹配后的流量仍走 AI Mili SOCKS5；**8443 严格住宅出口始终不变**。VPNGate 本身无法因此获得 IPv6 住宅出口。
+- 选择 IPv6-only 前会检查 VPS 的全局 IPv6 地址、默认 IPv6 路由以及公网可达性，支持多地址时手动选定出站源 IPv6。没有 IPv6 的 VPS 会拒绝切换。
+- IPv6-only 模式对普通 443 流量启用 IPv6 DNS 解析、拒绝解析后的 IPv4 地址；因此仅有 IPv4 的目标网站可能无法访问，而不是退回 VPS IPv4。
+- 切换前自动保留 `/etc/sing-box/vp-backups/` 备份，先运行 `sing-box check`，再重启 sing-box，服务启动失败会尝试自动回滚。切换可能短暂中断节点连接，不会主动改变 SSH 和系统默认路由。
+- 此功能不能代替 Karing TUN 和 DNS 接管；是否真正使用 IPv6 出口应在 Karing 节点连接后做端到端测试。只看 VPS 上 `curl -6` 的检测结果不足以证明代理客户端使用了 IPv6。
+
+### BBRv3 项目集成
+
+菜单选择 BBRv3 后才会下载并启动 [byJoey/Actions-bbr-v3](https://github.com/byJoey/Actions-bbr-v3) 的交互式安装脚本。出于安全性和可重现性，上游脚本固定至提交 `4f9bd79bd66b6115f717665403e6d29839551604`；不复制其内核包，也不会在安装 `vp`、切换 IPv6 时自动装内核或重启。
+
+⚠️ BBRv3 是内核级变更，可能影响 VPS 驱动、引导和网络；必须确认能通过云厂商控制台/救援模式恢复后再自行在上游菜单选择安装。**BBRv3 安装与 IPv6 出口切换是完全独立的两个功能。**
