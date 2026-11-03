@@ -1,0 +1,34 @@
+name: Validate VPS management code
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check Bash scripts
+        shell: bash
+        run: |
+          bash -n deploy_vps_claude.sh
+          bash -n install_manager.sh
+          bash -n install_aimili_strict.sh
+      - name: Check Python sources
+        run: |
+          python3 -m py_compile vp_manager.py
+          python3 -m py_compile aimili/vpngate_manager.py
+      - name: Assert strict-residential integration points
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          s = Path('aimili/vpngate_manager.py').read_text(encoding='utf-8')
+          assert 'def strict_residential_match(' in s
+          assert 'def require_residential_exit_ip(' in s
+          assert 'routing_ip_type == "residential_strict"' in s
+          assert s.count('not in ("all", "residential", "residential_strict", "hosting")') == 2
+          assert "data-value=\"residential_strict\"" in s
+          assert 'require_residential_exit_ip(res.get("ip", ""))' in s
+          assert 'if not strict_residential_match(node)' in s
+          print('Strict-residential checks passed')
+          PY
