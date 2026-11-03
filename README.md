@@ -96,6 +96,39 @@ vp update
 - 切换前自动保留 `/etc/sing-box/vp-backups/` 备份，先运行 `sing-box check`，再重启 sing-box，服务启动失败会尝试自动回滚。切换可能短暂中断节点连接，不会主动改变 SSH 和系统默认路由。
 - 此功能不能代替 Karing TUN 和 DNS 接管；是否真正使用 IPv6 出口应在 Karing 节点连接后做端到端测试。只看 VPS 上 `curl -6` 的检测结果不足以证明代理客户端使用了 IPv6。
 
+### AI Mili 改进版：严格住宅 IP 自动选择
+
+> 2026-11-03：本仓库提供 [AI Mili VPNGate](https://github.com/OpenMili/aimili-vpngate) 2.1.5 的修改版 `aimili/vpngate_manager.py`，并将其整合进新的 VPS 一键部署流程。原始项目依照 GPL-3.0 授权；本仓库的修改说明见 `aimili/UPSTREAM.md`。
+
+这是**真正的服务端节点选择策略**，与两个 VLESS 入口不是同一回事：
+
+- 443 和 8443 是两个**独立的入站端口**；Claude 流量**不会从 443 转送到 8443**。
+- 443 普通入口仍按域名规则出站；识别到的 Claude TCP 域名通过本地 `aimili-residential` SOCKS5。
+- 8443 独立入口继续要求 TCP 全部交由 AI Mili，UDP 拒绝。
+- 新增 AI Mili 网页面板选项 **「严格住宅 IP」**：自动候选和手工连接均只接受 `ip_type=residential` 且 `ip_type_confidence=medium/high`；明确排除 `unknown` / `hosting` / `mobile` / 低置信度。
+- 完成 OpenVPN 连接后会重新检测**实际 SOCKS5 出口 IP**；健康检查也复核出口。无法证明为住宅时拒绝该连接、尝试符合条件的其他节点；没有候选则保持出口不可用，不自动降级到机房或未知。
+- 有效 IP 分类来自项目现有的 ip-api / ipapi.is 数据和启发式规则；「中/高置信度」**不等于独立证实住宅身份**。分类有误差，VPNGate 节点出口也可能发生变化，不能保证 Claude 账号不触发风控。
+
+**现有已安装 VPS，无须重装、不用重新生成 REALITY 密钥：**
+
+```bash
+curl -fL --retry 3 -o /root/install_aimili_strict.sh https://raw.githubusercontent.com/hhsbjbsj/vps-claude-proxy-deploy/main/install_aimili_strict.sh
+bash -n /root/install_aimili_strict.sh
+bash /root/install_aimili_strict.sh
+```
+
+安装器会保留原面板地址、端口、账号及密码，在 `/var/backups/vp-aimili/` 备份原始管理器源码与 UI 配置，并启用自动选择的严格住宅模式。首次启动可能需要完成 IP 分类后才有可用节点。
+
+已经安装 `vp` 管理工具的用户，更新菜单后可通过 **菜单 9** 或运行 `vp residential-strict` 重新安装此功能；原有 `ml` 菜单与 8787 Web 面板依旧保留。Web 面板里也可以手动切换筛选模式。
+
+```bash
+curl -fL --retry 3 -o /root/install_manager.sh https://raw.githubusercontent.com/hhsbjbsj/vps-claude-proxy-deploy/main/install_manager.sh
+bash /root/install_manager.sh
+vp
+```
+
+**更新提醒：**上游的 `ml update` 会重置其源代码，可能覆盖严格住宅修改版。如进行上游更新，应先确认兼容性；当前安装器仅接受已审核的 AimiliVPN 2.1.5 基线，版本不匹配会拒绝覆盖。切勿误以为更新后仍存在严格出口保护。
+
 ### BBRv3 项目集成
 
 菜单选择 BBRv3 后才会下载并启动 [byJoey/Actions-bbr-v3](https://github.com/byJoey/Actions-bbr-v3) 的交互式安装脚本。出于安全性和可重现性，上游脚本固定至提交 `4f9bd79bd66b6115f717665403e6d29839551604`；不复制其内核包，也不会在安装 `vp`、切换 IPv6 时自动装内核或重启。
