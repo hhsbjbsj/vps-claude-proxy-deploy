@@ -15,6 +15,20 @@ import sys
 import tempfile
 import time
 
+
+def configure_utf8_stdio() -> None:
+    """Minimal VPS installations sometimes advertise Latin-1 for console IO.
+    Do not let printing a Chinese menu crash VP. This is process-local only.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding='utf-8', errors='backslashreplace')
+        except (AttributeError, OSError, ValueError):
+            pass
+
+
+configure_utf8_stdio()
+
 CFG = Path('/etc/sing-box/config.json')
 BASE = Path('/etc/sing-box')
 URL = 'https://raw.githubusercontent.com/hhsbjbsj/vps-claude-proxy-deploy/main'
