@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""VPS proxy management (terminal): sing-box v1.14, Aimili, and opt-in BBRv3."""
+"""VP direct-only VPS management: sing-box v1.14, IPv4/IPv6, opt-in BBRv3."""
 from __future__ import annotations
 
 import argparse
@@ -31,7 +31,7 @@ configure_utf8_stdio()
 
 CFG = Path('/etc/sing-box/config.json')
 BASE = Path('/etc/sing-box')
-URL = 'https://raw.githubusercontent.com/hhsbjbsj/vps-claude-proxy-deploy/main'
+URL = 'https://raw.githubusercontent.com/hhsbjbsj/vps-claude-proxy-deploy/no-aimili'
 BBR_REF = '4f9bd79bd66b6115f717665403e6d29839551604'
 BBR_URL = f'https://raw.githubusercontent.com/byJoey/Actions-bbr-v3/{BBR_REF}/install.sh'
 MANAGED_INBOUND = ['normal-443']
@@ -82,8 +82,8 @@ def load() -> dict:
     cfg = json.loads(CFG.read_text())
     ins = {x.get('tag'): x for x in cfg.get('inbounds', [])}
     outs = {x.get('tag'): x for x in cfg.get('outbounds', [])}
-    if 'normal-443' not in ins or 'strict-8443' not in ins:
-        raise RuntimeError('不是本项目预期的 443/8443 配置；为避免误改，已停止。')
+    if 'normal-443' not in ins or 'backup-8443' not in ins:
+        raise RuntimeError('不是 no-aimili 分支的 443/8443 配置；拒绝修改其他项目的节点。')
     if outs.get('vps-direct', {}).get('type') != 'direct':
         raise RuntimeError('缺少本项目的 vps-direct 出站；已停止。')
     if cfg.get('route', {}).get('final') != 'vps-direct':
@@ -166,7 +166,7 @@ def switch(mode: str, address: str | None = None) -> None:
 
     updated = copy.deepcopy(cfg)
     rules = updated['route'].setdefault('rules', [])
-    # Preserve the original split routing order, including the Claude -> Aimili rules.
+    # Preserve custom rules while updating only the primary 443 inlet.
     rules[:] = [rule for rule in rules if not is_managed_rule(rule)]
     rules.append({'inbound': MANAGED_INBOUND, 'action': 'resolve',
                   'server': 'local-dns',
@@ -208,7 +208,7 @@ def switch(mode: str, address: str | None = None) -> None:
         print(f'成功：443 普通节点直连流量使用 {mode.upper()} 出口。')
         if address:
             print('绑定源 IPv6 地址：' + address)
-        print('Claude 命中的连接仍通过 AI Mili；8443 严格住宅节点不变。')
+        print('仅对 443 主节点应用出口切换；8443 备用节点保持默认直连策略。')
         print('配置备份：' + str(backup))
         print('注意：原有连接可能在 sing-box 重启时中断；只对新连接生效。')
     finally:
@@ -226,7 +226,7 @@ def run_status() -> None:
             print('绑定 IPv6：' + outbound['inet6_bind_address'])
     except Exception as e:
         print('配置：' + str(e))
-    for name in ('sing-box', 'aimilivpn'):
+    for name in ('sing-box',):
         print(f'{name}: {service_status(name)}')
     print('IPv6 全局地址：' + (', '.join(ipv6_addresses()) or '无'))
     route6 = cmd(['ip', '-6', 'route', 'show', 'default'], timeout=5)
@@ -234,7 +234,6 @@ def run_status() -> None:
     for kind, args in (
         ('VPS IPv4 直连', ['curl','-4','-fsS','--max-time','7','https://api.ipify.org']),
         ('VPS IPv6 直连', ['curl','-6','-fsS','--max-time','7','https://api64.ipify.org']),
-        ('AI Mili SOCKS5 TCP', ['curl','-4','-fsS','--max-time','7','--proxy','socks5h://127.0.0.1:7928','https://api.ipify.org']),
     ):
         try:
             r = cmd(args, timeout=9)
@@ -272,23 +271,6 @@ def bbr_menu() -> None:
         subprocess.run(['bash',str(path)],env={**os.environ,'BBRV3_SKIP_QUICK_COMMAND':'1'},check=False)
 
 
-def install_strict_residential() -> None:
-    require_root()
-    print('\n这会替换 AimiliVPN 管理器代码，保留面板账号和 sing-box 节点。')
-    print('仅选择识别为住宅、置信度中/高的 VPNGate 节点，并检查实际代理出口。')
-    print('没有符合条件的节点时不回退到未知、移动或机房 IP。')
-    if input('输入 STRICT 确认安装或修复此模式（其他输入取消）：').strip() != 'STRICT':
-        return
-    with tempfile.TemporaryDirectory(prefix='vp-aimili-strict-') as directory:
-        script = Path(directory) / 'install_aimili_strict.sh'
-        r = cmd(['curl', '-fL', '--retry', '3', '-o', str(script),
-                 URL + '/install_aimili_strict.sh'], timeout=90)
-        if r.returncode:
-            raise RuntimeError('下载严格住宅安装器失败：' + r.stderr[-300:])
-        v = cmd(['bash', '-n', str(script)], timeout=10)
-        if v.returncode:
-            raise RuntimeError('安装器语法检查失败：' + v.stderr[-300:])
-        subprocess.run(['bash', str(script)], check=True)
 
 
 def update_manager() -> None:
@@ -312,18 +294,16 @@ def menu() -> None:
         except Exception:
             mode = '配置不可识别'
         print('\n' + '='*50)
-        print(' VP · Linux VPS 代理管理面板（终端版）')
-        print(' 443 出站：' + mode + '   |   8443：严格住宅 TCP')
+        print(' VP · VPS 直连版管理面板 (no-aimili)')
+        print(' 443 主节点：' + mode + '   |   8443：备用 VPS 直连')
         print('='*50)
-        print('1  运行状态、IPv4/IPv6 和住宅出口检查')
-        print('2  将 443 普通出口切换为 IPv4-only')
-        print('3  将 443 普通出口切换为 IPv6-only（可选择源地址）')
-        print('4  打开 AI Mili 管理菜单（ml）')
-        print('5  打开 BBRv3 官方菜单（手动确认）')
-        print('6  显示 Karing 节点链接（敏感凭据）')
-        print('7  查看 sing-box 最近日志')
-        print('8  更新 VP 管理工具（不更改节点配置）')
-        print('9  AI Mili 严格住宅 IP 自动选择（安装/修复）')
+        print('1  运行状态、IPv4/IPv6 出口检查')
+        print('2  443 主节点切换到 IPv4-only')
+        print('3  443 主节点切换到 IPv6-only（可选源地址）')
+        print('4  打开 BBRv3 安装菜单（需确认）')
+        print('5  显示 Karing 节点链接（敏感凭据）')
+        print('6  查看 sing-box 最近日志')
+        print('7  更新 VP 直连版管理工具')
         print('0  退出')
         choice = input('请选择：').strip()
         try:
@@ -336,41 +316,37 @@ def menu() -> None:
             elif choice == '3':
                 addrs = ipv6_addresses()
                 if not addrs:
-                    print('未检测到可用的公网 IPv6，先检查服务商 IPv6 和默认路由。')
+                    print('没有检测到有效公网 IPv6 或默认路由。')
                     continue
-                for i, addr in enumerate(addrs, 1):
-                    print(f'{i}. {addr}')
-                selected = input('选择要绑定的 IPv6 地址编号：').strip()
+                for i, address in enumerate(addrs, 1):
+                    print(f'{i}. {address}')
+                selected = input('请选择源 IPv6 地址编号：').strip()
                 if not selected.isdigit() or not 1 <= int(selected) <= len(addrs):
-                    print('选择无效。'); continue
-                switch('ipv6',addrs[int(selected)-1])
+                    print('选择无效。')
+                    continue
+                switch('ipv6', addrs[int(selected)-1])
             elif choice == '4':
-                subprocess.run(['ml'],check=False)
-            elif choice == '5':
                 bbr_menu()
+            elif choice == '5':
+                p = Path('/root/karing-nodes.txt')
+                print(p.read_text() if p.is_file() else '没有找到节点链接。')
+                print('不要公开这些含 UUID 和 REALITY 公钥参数的节点链接。')
             elif choice == '6':
-                path=Path('/root/karing-nodes.txt')
-                print(path.read_text() if path.exists() else '没有找到节点链接。')
-                print('请勿公开分享这些含 UUID 和密钥参数的节点链接。')
-            elif choice == '7':
                 if has_systemd():
                     subprocess.run(['journalctl','-u','sing-box','-n','50','--no-pager'],check=False)
                 else:
-                    path = Path('/var/log/sing-box.err.log')
-                    if not path.exists():
-                        path = Path('/var/log/sing-box.log')
-                    subprocess.run(['tail','-n','50',str(path)],check=False)
-            elif choice == '8':
+                    p = Path('/var/log/sing-box.err.log')
+                    if not p.is_file():
+                        p = Path('/var/log/sing-box.log')
+                    subprocess.run(['tail','-n','50',str(p)],check=False)
+            elif choice == '7':
                 update_manager()
-            elif choice == '9':
-                install_strict_residential()
             else:
                 print('请选择有效菜单编号。')
-        except (OSError, RuntimeError, subprocess.TimeoutExpired, subprocess.CalledProcessError, ValueError) as e:
-            print('操作失败：' + str(e))
+        except (OSError, RuntimeError, subprocess.TimeoutExpired, subprocess.CalledProcessError, ValueError) as exc:
+            print('操作失败：' + str(exc))
         except KeyboardInterrupt:
-            print('\n本次操作已取消。')
-
+            print('\n操作已取消。')
 
 def main() -> None:
     parser = argparse.ArgumentParser(description='VP VPS proxy terminal manager')
@@ -381,14 +357,12 @@ def main() -> None:
     out.add_argument('--source-ipv6',default=None)
     sub.add_parser('bbr')
     sub.add_parser('update')
-    sub.add_parser('residential-strict')
     args = parser.parse_args()
     try:
         if args.command == 'status': run_status()
         elif args.command == 'egress': switch(args.mode,args.source_ipv6)
         elif args.command == 'bbr': bbr_menu()
         elif args.command == 'update': update_manager()
-        elif args.command == 'residential-strict': install_strict_residential()
         else: menu()
     except (RuntimeError, OSError, subprocess.TimeoutExpired, subprocess.CalledProcessError, ValueError) as e:
         print('错误：'+str(e),file=sys.stderr)
