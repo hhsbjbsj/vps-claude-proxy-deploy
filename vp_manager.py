@@ -221,6 +221,25 @@ def bbr_menu() -> None:
         subprocess.run(['bash',str(path)],env={**os.environ,'BBRV3_SKIP_QUICK_COMMAND':'1'},check=False)
 
 
+def install_strict_residential() -> None:
+    require_root()
+    print('\n这会替换 AimiliVPN 管理器代码，保留面板账号和 sing-box 节点。')
+    print('仅选择识别为住宅、置信度中/高的 VPNGate 节点，并检查实际代理出口。')
+    print('没有符合条件的节点时不回退到未知、移动或机房 IP。')
+    if input('输入 STRICT 确认安装或修复此模式（其他输入取消）：').strip() != 'STRICT':
+        return
+    with tempfile.TemporaryDirectory(prefix='vp-aimili-strict-') as directory:
+        script = Path(directory) / 'install_aimili_strict.sh'
+        r = cmd(['curl', '-fL', '--retry', '3', '-o', str(script),
+                 URL + '/install_aimili_strict.sh'], timeout=90)
+        if r.returncode:
+            raise RuntimeError('下载严格住宅安装器失败：' + r.stderr[-300:])
+        v = cmd(['bash', '-n', str(script)], timeout=10)
+        if v.returncode:
+            raise RuntimeError('安装器语法检查失败：' + v.stderr[-300:])
+        subprocess.run(['bash', str(script)], check=True)
+
+
 def update_manager() -> None:
     require_root()
     print('更新管理菜单不会覆盖 sing-box 配置，也不会重新安装节点。')
@@ -253,6 +272,7 @@ def menu() -> None:
         print('6  显示 Karing 节点链接（敏感凭据）')
         print('7  查看 sing-box 最近日志')
         print('8  更新 VP 管理工具（不更改节点配置）')
+        print('9  AI Mili 严格住宅 IP 自动选择（安装/修复）')
         print('0  退出')
         choice = input('请选择：').strip()
         try:
@@ -285,6 +305,8 @@ def menu() -> None:
                 subprocess.run(['journalctl','-u','sing-box','-n','50','--no-pager'],check=False)
             elif choice == '8':
                 update_manager()
+            elif choice == '9':
+                install_strict_residential()
             else:
                 print('请选择有效菜单编号。')
         except (OSError, RuntimeError, subprocess.TimeoutExpired, subprocess.CalledProcessError, ValueError) as e:
@@ -302,12 +324,14 @@ def main() -> None:
     out.add_argument('--source-ipv6',default=None)
     sub.add_parser('bbr')
     sub.add_parser('update')
+    sub.add_parser('residential-strict')
     args = parser.parse_args()
     try:
         if args.command == 'status': run_status()
         elif args.command == 'egress': switch(args.mode,args.source_ipv6)
         elif args.command == 'bbr': bbr_menu()
         elif args.command == 'update': update_manager()
+        elif args.command == 'residential-strict': install_strict_residential()
         else: menu()
     except (RuntimeError, OSError, subprocess.TimeoutExpired, subprocess.CalledProcessError, ValueError) as e:
         print('错误：'+str(e),file=sys.stderr)
