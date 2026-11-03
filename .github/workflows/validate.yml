@@ -26,9 +26,14 @@ jobs:
           deploy=Path('deploy_vps_claude.sh').read_text()
           manager=Path('vp_manager.py').read_text()
           installer=Path('install_manager.sh').read_text()
-          for name in ('aimili', 'vpngate', 'openvpn', '7928', '8787'):
-              assert name not in deploy.lower().split('info "saving karing import links"')[0].replace('no aimili','').replace('no openvpn',''), name
-              assert name not in manager.lower(), name
+          # Allow prose explaining what is excluded, but refuse executable integration.
+          for name in ('AIMILIVPN_NONINTERACTIVE', 'install_aimili_strict',
+                       'aimili-residential', 'vpngate_manager.py',
+                       '127.0.0.1:7928', '8787/tcp', 'socks5h://'):
+              for fname, contents in (('deploy',deploy), ('manager',manager), ('installer',installer)):
+                  assert name not in contents, (fname, name)
+          assert "ml status" not in deploy
+          assert "sub.add_parser('residential-strict')" not in manager
           assert '/no-aimili/' in deploy
           assert '/no-aimili/' in installer
           assert "backup-8443" in deploy and "backup-direct" in deploy
