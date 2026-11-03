@@ -19,6 +19,10 @@ jobs:
         run: |
           python3 -m py_compile vp_manager.py
           python3 -m py_compile aimili/vpngate_manager.py
+      - name: Verify Claude never forced from 443 to residential
+        run: |
+          python3 -m py_compile remove_claude_forced_routes.py
+          python3 tests/test_claude_no_forced_residential.py
       - name: Regression test for VP menu with Latin-1 SSH terminal
         run: python3 tests/test_vp_encoding.py
       - name: Regression test for AI Mili Latin-1 stdout crash
