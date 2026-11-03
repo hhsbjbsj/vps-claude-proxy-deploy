@@ -66,10 +66,38 @@ bash -n /root/install_manager.sh && bash /root/install_manager.sh
 ## 部署内容
 
 - sing-box 1.14.4，启动 VLESS + REALITY（Vision），随机生成凭据。
-- TCP **443**：普通入口，服务端能识别的 Claude 域名的 TCP 流量走 AI Mili，其他默认由 VPS 直连。
+- TCP **443**：普通入口，**所有网站（包括 Claude）默认使用 VPS 直连出口及本地 DNS**，不再有 Claude 域名强制住宅规则。
 - TCP **8443**：严格入口，所有 TCP 通过 AI Mili，失败后不自动改走 VPS 机房出口；UDP 拒绝。
 - AI Mili 的 SOCKS5：`127.0.0.1:7928`，Web 控制面板：`0.0.0.0:8787`（公网 IPv4 可访问）。
 - Karing 导入链接保存在 VPS 的 `/root/karing-nodes.txt`，文件权限为 0600。
+
+## 已部署完整版本：移除 Claude 强制住宅路由
+
+**2026-11-03 修正：旧版 main 部署器曾写入三条 Claude 特殊规则**，强行将 Claude 的 TCP 出站和 DNS 指向住宅代理，并拒绝其 UDP 流量。这会使普通 443 节点也走住宅代理。最新版**不再生成这些规则**：
+
+- **443**：所有网站（包括 Claude）默认经 VPS 直连（vps-direct），使用本地 DNS（local-dns），没有 Claude 特判。
+- **8443**：是另一个可选的住宅入口，TCP 走本地 AI Mili SOCKS5，UDP 拒绝，相关 DoH 仍通过住宅出口。只有在 Karing **主动选择 8443 节点**或自行配置链式代理时才会走它。
+- **已有 VPS 不会因为 GitHub 更新自动改变配置**，需要单独迁移。迁移不卸载 AI Mili、不会替换 UUID/REALITY 密钥，也不更改 Karing 节点链接。
+
+为避免误删定制规则，仓库提供只清除旧版三条 Claude 强制规则的修复器 remove_claude_forced_routes.py。先下载并做只读检查：
+
+~~~bash
+curl -fL --retry 3 -o /root/remove_claude_forced_routes.py https://raw.githubusercontent.com/hhsbjbsj/vps-claude-proxy-deploy/main/remove_claude_forced_routes.py
+~~~
+
+~~~bash
+python3 /root/remove_claude_forced_routes.py
+~~~
+
+审查修复器后，明确执行修改（包含配置备份、sing-box check、重启和失败回滚）：
+
+~~~bash
+python3 /root/remove_claude_forced_routes.py --apply
+~~~
+
+备份写入 /etc/sing-box/vp-backups/，只作用于符合本项目 main 443/8443 结构的配置。**如果检测到其他自定义 Claude 住宅规则，会拒绝自动删除并提示人工检查。** 应用时 sing-box 会短暂重启，SSH、AI Mili 服务和客户端节点凭据保持不变。
+
+> 注意：修复的是 **VPS sing-box 服务端** 规则。如果你在 **Karing** 客户端另设了 Claude → 住宅节点或链式代理，客户端规则仍然有效；需要分别检查。
 
 ## 运行要求与兼容性
 
@@ -290,7 +318,7 @@ vp update
 ### IPv6 出口切换范围与限制
 
 - 切换的是 **443 普通节点的 VPS 直连出站**，不是 443 的连接入口地址，也不是 VPS 系统全局 IPv6 开关。
-- Claude 域名匹配后的流量仍走 AI Mili SOCKS5；**8443 严格住宅出口始终不变**。VPNGate 本身无法因此获得 IPv6 住宅出口。
+- **443 不对 Claude 做特殊住宅分流**；443 使用 VPS 直连出站，**8443 是独立、由用户主动选择的住宅入口**。VPNGate 本身不会因为 VPS 切换 IPv6 就获得 IPv6 住宅出口。
 - 选择 IPv6-only 前会检查 VPS 的全局 IPv6 地址、默认 IPv6 路由以及公网可达性，支持多地址时手动选定出站源 IPv6。没有 IPv6 的 VPS 会拒绝切换。
 - IPv6-only 模式对普通 443 流量启用 IPv6 DNS 解析、拒绝解析后的 IPv4 地址；因此仅有 IPv4 的目标网站可能无法访问，而不是退回 VPS IPv4。
 - 切换前自动保留 `/etc/sing-box/vp-backups/` 备份，先运行 `sing-box check`，再重启 sing-box，服务启动失败会尝试自动回滚。切换可能短暂中断节点连接，不会主动改变 SSH 和系统默认路由。
@@ -302,8 +330,8 @@ vp update
 
 这是**真正的服务端节点选择策略**，与两个 VLESS 入口不是同一回事：
 
-- 443 和 8443 是两个**独立的入站端口**；Claude 流量**不会从 443 转送到 8443**。
-- 443 普通入口仍按域名规则出站；识别到的 Claude TCP 域名通过本地 `aimili-residential` SOCKS5。
+- 443 和 8443 是两个**独立的入站端口**；不能根据访问的网站偷偷改变入口或自动走住宅 IP。
+- 443 普通入口的所有流量（包括 Claude）通过 `vps-direct`，默认 DNS 使用 `local-dns`，**不会因 Claude 域名自动发送到 `aimili-residential`**。
 - 8443 独立入口继续要求 TCP 全部交由 AI Mili，UDP 拒绝。
 - 新增 AI Mili 网页面板选项 **「严格住宅 IP」**：自动候选和手工连接均只接受 `ip_type=residential` 且 `ip_type_confidence=medium/high`；明确排除 `unknown` / `hosting` / `mobile` / 低置信度。
 - 完成 OpenVPN 连接后会重新检测**实际 SOCKS5 出口 IP**；健康检查也复核出口。无法证明为住宅时拒绝该连接、尝试符合条件的其他节点；没有候选则保持出口不可用，不自动降级到机房或未知。
