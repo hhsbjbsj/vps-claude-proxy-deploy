@@ -173,11 +173,14 @@ def vless_in(tag, port):
 cfg = {
  "log": {"level": "info", "timestamp": True},
  "inbounds": [vless_in("normal-443", 443), vless_in("backup-8443", 8443)],
- "outbounds": [{"type": "direct", "tag": "vps-direct"}],
+ "outbounds": [
+   {"type": "direct", "tag": "vps-direct"},
+   {"type": "direct", "tag": "backup-direct"}
+ ],
  "dns": {"servers": [{"type": "local", "tag": "local-dns"}], "final": "local-dns"},
  "route": {
    "default_domain_resolver": "local-dns",
-   "rules": [],
+   "rules": [{"inbound": ["backup-8443"], "action": "route", "outbound": "backup-direct"}],
    "final": "vps-direct"
  }
 }
