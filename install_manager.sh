@@ -2,7 +2,7 @@
 # Install or update only the VP terminal management menu. No sing-box or kernel rewrite.
 set -Eeuo pipefail
 umask 077
-[[ \${EUID:-$(id -u)} -eq 0 ]] || { echo '[ERROR] 请使用 root 或 sudo。' >&2; exit 1; }
+[[ ${EUID:-$(id -u)} -eq 0 ]] || { echo '[ERROR] 请使用 root 或 sudo。' >&2; exit 1; }
 [[ -f /etc/sing-box/config.json ]] || { echo '[ERROR] 未发现现有 sing-box 配置，先部署基础节点。' >&2; exit 1; }
 command -v python3 >/dev/null || { echo '[ERROR] 缺少 python3。' >&2; exit 1; }
 command -v curl >/dev/null || { echo '[ERROR] 缺少 curl。' >&2; exit 1; }
