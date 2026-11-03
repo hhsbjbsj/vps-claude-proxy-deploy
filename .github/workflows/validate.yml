@@ -29,6 +29,6 @@ jobs:
           assert s.count('not in ("all", "residential", "residential_strict", "hosting")') == 2
           assert "data-value=\"residential_strict\"" in s
           assert 'require_residential_exit_ip(res.get("ip", ""))' in s
-          assert 'if not strict_residential_match(node)' in s
+          assert 'and not strict_residential_match(node):' in s
           print('Strict-residential checks passed')
           PY
