@@ -83,6 +83,7 @@ chmod 755 "$GUARD"
 if [[ $SERVICE_MGR == systemd ]]; then
   cat > "$DROPIN" <<'DROPIN'
 [Service]
+Environment=PYTHONIOENCODING=utf-8:backslashreplace
 ExecStartPre=/usr/local/libexec/vp-aimili-guard
 DROPIN
   chmod 644 "$DROPIN"
