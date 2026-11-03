@@ -6,34 +6,50 @@
 
 ## 已部署 VPS 的 VP 中文菜单乱码或 Latin-1 报错
 
-如果 `sing-box` 和 `aimilivpn` 都显示 `active`，但运行 `vp` 或 `vp status` 时出现 `UnicodeEncodeError: 'latin-1' codec can't encode characters`，这是 SSH 登录环境的 Python 输出编码问题，不是代理节点故障。无需重装或更换节点密钥。
+部分最小化 Debian VPS 的 Python 标准输出使用 Latin-1，可能导致 `vp` 的中文菜单抛出 `UnicodeEncodeError`。**服务 `sing-box`、`aimilivpn` 正常运行时，完全不需要重新部署代理或更换节点凭据。**
 
-临时运行：
+### 先验证原因（只读）
+
+```bash
+type -a vp
+```
+
+```bash
+sed -n '1,8p' /usr/local/bin/vp
+```
+
+如果输出只有：
+
+```bash
+#!/usr/bin/env bash
+exec /usr/bin/python3 /usr/local/libexec/vp_manager.py "$@"
+```
+
+那么是**本地旧启动器缺少 UTF-8 环境设置**，不是 Linux 发行版、服务端节点或别名造成的。临时运行：
 
 ```bash
 PYTHONIOENCODING=utf-8:backslashreplace vp status
 ```
 
-如果升级后 **`/usr/local/bin/vp` 可用，但直接输入 `vp` 仍显示 Latin-1 报错**，优先排查登录 Shell 中已有的同名 alias、function 或旧命令路径；更新子进程不能清除当前 Shell 中缓存的命令解析。运行：
+### 立即修复当前服务器（不影响代理服务）
+
+先备份，再给缺少设置的启动器补一行；此命令可重复执行，不会重复添加相同设置：
 
 ```bash
-type -a vp
-sed -n '1,8p' /usr/local/bin/vp
-/usr/local/bin/vp status
+cp -an /usr/local/bin/vp /usr/local/bin/vp.bak
 ```
-
-若直接运行 `/usr/local/bin/vp status` 正常，则可以在**当前 Shell** 中尝试：
 
 ```bash
-unalias vp 2>/dev/null || true
-unset -f vp 2>/dev/null || true
-hash -r
-vp status
+grep -q '^export PYTHONIOENCODING=utf-8:backslashreplace$' /usr/local/bin/vp || sed -i '2i export PYTHONIOENCODING=utf-8:backslashreplace' /usr/local/bin/vp
 ```
 
-若绝对路径仍报错，但 `PYTHONIOENCODING=utf-8:backslashreplace /usr/local/bin/vp status` 正常，请保留报错信息继续诊断，不必重新部署代理。
+```bash
+bash -n /usr/local/bin/vp && vp status
+```
 
-永久更新 `vp` 管理器（不会修改 sing-box、AI Mili 或 Karing 节点密钥）：
+再直接运行 `vp` 即可。这**只改 `/usr/local/bin/vp`**，不会重启 sing-box / AI Mili、修改 443/8443 或覆盖 Karing 链接。
+
+### 从 GitHub 更新菜单（更推荐后续使用）
 
 ```bash
 curl -fL --retry 3 -o /root/install_manager.sh https://raw.githubusercontent.com/hhsbjbsj/vps-claude-proxy-deploy/main/install_manager.sh
@@ -43,7 +59,9 @@ curl -fL --retry 3 -o /root/install_manager.sh https://raw.githubusercontent.com
 bash -n /root/install_manager.sh && bash /root/install_manager.sh
 ```
 
-之后可以直接使用 `vp`、`vp status`。安装器通过环境变量和程序入口双重设置 UTF-8，避免最小化 Debian 的 Latin-1 输出异常。
+新版安装器会**检测下载的管理程序是否包含 UTF-8 修复**，安装后还会校验 `/usr/local/bin/vp` 的 UTF-8 设置并运行启动测试。若下载到旧缓存内容，会拒绝静默覆盖原有程序。更新后可通过 `sed -n '1,8p' /usr/local/bin/vp` 查看启动器是否包含 `export PYTHONIOENCODING=utf-8:backslashreplace`。
+
+如果依然出现编码异常，请附上 `type -a vp`、`sed -n '1,8p' /usr/local/bin/vp` 和 `vp status` 的输出继续诊断。
 
 ## 部署内容
 
