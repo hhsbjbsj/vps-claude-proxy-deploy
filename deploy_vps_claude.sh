@@ -99,6 +99,7 @@ cfg = {
    "final": "local-dns"
  },
  "route": {
+   "default_domain_resolver": "local-dns",
    "rules": [
      {"action": "sniff", "timeout": "300ms"},
      {"inbound": ["strict-8443"], "network": "udp", "action": "reject"},
