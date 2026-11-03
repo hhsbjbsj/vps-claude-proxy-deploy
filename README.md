@@ -4,6 +4,28 @@
 
 > ⚠️ 实验性配置：已做 Bash 语法检查，但未在目标 VPS 上完成端到端验证。脚本会安装服务、修改系统网络参数；应在可通过云厂商控制台恢复的 VPS 上使用。请先审查源码。
 
+## 已部署 VPS 的 VP 中文菜单乱码或 Latin-1 报错
+
+如果 `sing-box` 和 `aimilivpn` 都显示 `active`，但运行 `vp` 或 `vp status` 时出现 `UnicodeEncodeError: 'latin-1' codec can't encode characters`，这是 SSH 登录环境的 Python 输出编码问题，不是代理节点故障。无需重装或更换节点密钥。
+
+临时运行：
+
+```bash
+PYTHONIOENCODING=utf-8:backslashreplace vp status
+```
+
+永久更新 `vp` 管理器（不会修改 sing-box、AI Mili 或 Karing 节点密钥）：
+
+```bash
+curl -fL --retry 3 -o /root/install_manager.sh https://raw.githubusercontent.com/hhsbjbsj/vps-claude-proxy-deploy/main/install_manager.sh
+```
+
+```bash
+bash -n /root/install_manager.sh && bash /root/install_manager.sh
+```
+
+之后可以直接使用 `vp`、`vp status`。安装器通过环境变量和程序入口双重设置 UTF-8，避免最小化 Debian 的 Latin-1 输出异常。
+
 ## 部署内容
 
 - sing-box 1.14.4，启动 VLESS + REALITY（Vision），随机生成凭据。
