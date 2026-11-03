@@ -1,41 +1,40 @@
-name: Validate VPS management code
+name: Validate direct-only VPS edition
 on:
   push:
-    branches: [main]
+    branches: [no-aimili]
   pull_request:
+    branches: [no-aimili]
 jobs:
   syntax:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Check Bash scripts
+      - name: Check direct-only shell scripts
         shell: bash
         run: |
           bash -n deploy_vps_claude.sh
           bash -n install_manager.sh
-          bash -n install_aimili_strict.sh
-          bash -n resume_deploy.sh
-      - name: Check Python sources
+      - name: Verify Python
         run: |
           python3 -m py_compile vp_manager.py
-          python3 -m py_compile aimili/vpngate_manager.py
-      - name: Regression test for VP menu with Latin-1 SSH terminal
-        run: python3 tests/test_vp_encoding.py
-      - name: Regression test for AI Mili Latin-1 stdout crash
-        run: python3 tests/test_aimili_encoding.py
-      - name: Assert strict-residential integration points
+          python3 tests/test_vp.py
+          python3 tests/test_vp_encoding.py
+      - name: Ensure no Aimili/VPNGate runtime integration is packaged
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          s = Path('aimili/vpngate_manager.py').read_text(encoding='utf-8')
-          assert 'def strict_residential_match(' in s
-          assert 'def require_residential_exit_ip(' in s
-          assert 'routing_ip_type == "residential_strict"' in s
-          assert s.count('not in ("all", "residential", "residential_strict", "hosting")') == 2
-          assert "data-value=\"residential_strict\"" in s
-          assert 'require_residential_exit_ip(res.get("ip", ""))' in s
-          assert 'and not strict_residential_match(node):' in s
-          print('Strict-residential checks passed')
+          deploy=Path('deploy_vps_claude.sh').read_text()
+          manager=Path('vp_manager.py').read_text()
+          installer=Path('install_manager.sh').read_text()
+          for name in ('aimili', 'vpngate', 'openvpn', '7928', '8787'):
+              assert name not in deploy.lower().split('info "saving karing import links"')[0].replace('no aimili','').replace('no openvpn',''), name
+              assert name not in manager.lower(), name
+          assert '/no-aimili/' in deploy
+          assert '/no-aimili/' in installer
+          assert "backup-8443" in deploy and "backup-direct" in deploy
+          assert not Path('aimili').exists()
+          assert not Path('install_aimili_strict.sh').exists()
+          print('PASS: direct-only edition has no Aimili runtime packaging')
           PY
 
   distro-preflight:
